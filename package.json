@@ -1,0 +1,11 @@
+{
+  "name": "iptv-pro-node",
+  "version": "1.0.0",
+  "description": "Sistema de Gerenciamento de Canais HLS em Node.js",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+  }
+}

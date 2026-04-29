@@ -1,0 +1,28 @@
+# Credenciais e Configurações Sensíveis
+# Importante: Mantenha uma cópia de exemplo (ex: config.php.example) se desejar
+config.php
+
+# Logs de execução e erro do sistema e do FFmpeg
+*.log
+debug.txt
+
+# Arquivos Temporários de Streaming (HLS)
+# Estes arquivos são gerados dinamicamente e mudam a cada segundo
+*.ts
+*.m3u8
+started_at.txt
+pid
+
+# Mídia e Binários
+# Vídeos para streaming e backups não devem ser versionados devido ao tamanho
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.tar.gz
+
+# Pastas de Cache, Downloads e Dados Temporários
+cache/
+playlists/
+.DS_Store
+Thumbs.db

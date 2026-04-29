@@ -1,0 +1,22 @@
+# Dependências do Node
+node_modules/
+
+# Arquivos temporários de Transmissão (HLS)
+# Ignoramos o conteúdo da pasta canais, mas mantemos a pasta em si se desejar
+canais/*/
+
+# Acervo de Vídeos (Arquivos de mídia grandes)
+24HORAS/
+
+# Logs de execução e do Nginx
+*.log
+npm-debug.log*
+
+# Banco de dados local / Configurações de canais
+# Geralmente ignorado para evitar conflitos de caminhos absolutos entre diferentes máquinas
+channels.json
+
+# Arquivos do Sistema Operacional
+.DS_Store
+Thumbs.db
+desktop.ini
