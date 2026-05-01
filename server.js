@@ -295,7 +295,8 @@ function startChannel(id) {
  * Servidor HTTP Simples
  */
 const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    try {
+        const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
     // 1. Verificação de Autenticação
     const cookies = getCookies(req);
@@ -534,6 +535,11 @@ const server = http.createServer(async (req, res) => {
             res.end(content);
         }
     });
+    } catch (err) {
+        console.error("[ERRO NO SERVIDOR]", err);
+        res.writeHead(500);
+        res.end("Erro interno no servidor");
+    }
 });
 
 /**
