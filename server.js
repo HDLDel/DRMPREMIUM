@@ -321,6 +321,15 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Rota de Logout
+    if (url.pathname === '/api/logout' && req.method === 'POST') {
+        res.writeHead(200, {
+            'Set-Cookie': `session_token=; Path=/; HttpOnly; Expires=${new Date(0).toUTCString()}`,
+            'Content-Type': 'application/json'
+        });
+        return res.end(JSON.stringify({ status: 'logged_out' }));
+    }
+
     // Redireciona para login se não estiver autenticado
     if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
         res.writeHead(302, { 'Location': '/login.html' });

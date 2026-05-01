@@ -18,6 +18,19 @@ async function updateStats() {
     }
 }
 
+async function logout() {
+    try {
+        const res = await fetch('/api/logout', {
+            method: 'POST'
+        });
+        if (res.ok) {
+            window.location.href = '/login.html';
+        }
+    } catch (err) {
+        console.error('Erro ao fazer logout:', err);
+    }
+}
+
 async function start(id) { // Removed 'nome' as it's part of the channel object now
     try {
         const res = await fetch('/api/start', {
