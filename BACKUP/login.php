@@ -1,31 +1,13 @@
 <?php
-session_start();
-require "config.php";
+include 'config.php';
 
-$erro = "";
-
-if(isset($_POST['usuario'])){
-
-    $usuario = $conn->real_escape_string($_POST['usuario']);
-    $senha_input = $_POST['senha'];
-
-    $sql = $conn->query("SELECT * FROM admin WHERE usuario='$usuario' LIMIT 1");
-
-    if($sql->num_rows > 0){
-
-        $user = $sql->fetch_assoc();
-
-        // aceita senha normal OU md5
-        if($user['senha'] === $senha_input || $user['senha'] === md5($senha_input)){
-            $_SESSION['logado'] = true;
-            header("Location: index.php");
-            exit;
-        } else {
-            $erro = "Login inválido";
-        }
-
+if ($_POST) {
+    if ($_POST['user'] == $USER && $_POST['pass'] == $PASS) {
+        $_SESSION['logado'] = true;
+        header("Location: index.php");
+        exit;
     } else {
-        $erro = "Login inválido";
+        $erro = "Usuário ou senha inválidos";
     }
 }
 ?>
@@ -34,82 +16,153 @@ if(isset($_POST['usuario'])){
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Sistema Canais 24h</title>
+<title>Login - Painel IPTV</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-body{
+body {
     margin:0;
-    background:#000;
     font-family:Arial;
+    background: linear-gradient(135deg,#0b0f1a,#0f172a);
+    color:#fff;
     display:flex;
-    justify-content:center;
     align-items:center;
+    justify-content:center;
     height:100vh;
+}
+
+/* CONTAINER */
+.container {
+    width:100%;
+    max-width:1100px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+/* ESQUERDA */
+.left {
+    width:50%;
+}
+
+.logo {
+    font-size:20px;
+    margin-bottom:20px;
+    color:#8b5cf6;
+}
+
+.titulo {
+    font-size:40px;
+    font-weight:bold;
+    margin-bottom:15px;
+}
+
+.desc {
+    color:#9ca3af;
+    margin-bottom:30px;
+    line-height:1.5;
+}
+
+.item {
+    margin-bottom:15px;
+    color:#d1d5db;
+}
+
+/* LOGIN BOX */
+.box {
+    width:350px;
+    background:#111827;
+    padding:30px;
+    border-radius:12px;
+    box-shadow:0 0 30px rgba(0,0,0,0.5);
+}
+
+.box h2 {
+    margin-bottom:20px;
+}
+
+input {
+    width:100%;
+    padding:12px;
+    margin:8px 0;
+    border:none;
+    border-radius:8px;
+    background:#1f2937;
     color:#fff;
 }
 
-.box{
-    background:#111;
-    padding:30px;
-    border-radius:10px;
-    width:300px;
-    text-align:center;
-}
-
-input{
+button {
     width:100%;
-    padding:10px;
-    margin:10px 0;
+    padding:12px;
+    background:#6366f1;
     border:none;
-    border-radius:5px;
-}
-
-button{
-    width:100%;
-    padding:10px;
-    background:#ff2a2a;
-    border:none;
+    border-radius:8px;
     color:#fff;
     font-weight:bold;
-    border-radius:5px;
+    margin-top:10px;
     cursor:pointer;
 }
 
-button:hover{
-    background:#cc0000;
+button:hover {
+    background:#4f46e5;
 }
 
-.erro{
+.erro {
     color:red;
     margin-top:10px;
 }
-.footer{
-    position:fixed;
+
+/* RODAPÉ */
+.footer {
+    position:absolute;
     bottom:10px;
+    width:100%;
+    text-align:center;
     font-size:12px;
-    color:#aaa;
+    color:#6b7280;
 }
 </style>
 
 </head>
+
 <body>
 
-<div class="box">
-    <h2>🔐 Sistema Canais 24h</h2>
+<div class="container">
 
-    <form method="POST">
-        <input type="text" name="usuario" placeholder="Usuário" required>
-        <input type="password" name="senha" placeholder="Senha" required>
-        <button type="submit">Entrar</button>
-    </form>
+    <!-- LADO ESQUERDO -->
+    <div class="left">
+        <div class="logo">⚡ Cyber Streaming</div>
 
-    <?php if($erro): ?>
-        <div class="erro"><?php echo $erro; ?></div>
-    <?php endif; ?>
+        <div class="titulo">Bem-vindo de volta</div>
+
+        <div class="desc">
+            Gerencie seus canais 24H de forma simples e profissional.
+            Crie streams contínuos, monitore conexões e mantenha seu sistema sempre online.
+        </div>
+
+        <div class="item">📺 Criação de canais 24H automática</div>
+        <div class="item">⚡ Sistema leve e otimizado (baixo CPU)</div>
+        <div class="item">📊 Monitoramento em tempo real</div>
+        <div class="item">🔐 Controle total do streaming</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="box">
+        <h2>Fazer login</h2>
+
+        <form method="POST">
+            <input name="user" placeholder="Usuário">
+            <input name="pass" type="password" placeholder="Senha">
+            <button>Entrar</button>
+        </form>
+
+        <div class="erro"><?php echo $erro ?? ""; ?></div>
+    </div>
+
 </div>
 
 <div class="footer">
-    Sistema exclusivo Cyber desde 2022
+    Sistema exclusivo Cyber © <?php echo date("Y"); ?>
 </div>
 
 </body>

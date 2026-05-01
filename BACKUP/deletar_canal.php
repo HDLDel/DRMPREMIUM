@@ -8,7 +8,7 @@ if (!isset($_GET['canal']) || empty($_GET['canal'])) {
 }
 
 $canal = $_GET['canal'];
-$base_dir = "/home/drmpremium/canais";
+$base_dir = "/home/drmpremium";
 
 $canal_path = null;
 

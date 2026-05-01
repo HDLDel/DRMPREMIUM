@@ -1,285 +1,540 @@
 <?php
-session_start();
-require "config.php";
+include 'config.php';
+proteger();
 
-if(!isset($_SESSION['logado'])){
-    header("Location: login.php");
+$base_dir = "/home/drmpremium";
+$canais = [];
+
+function formatarUptime($segundos) {
+    $segundos = max(0, (int)$segundos);
+
+    $horas = floor($segundos / 3600);
+    $minutos = floor(($segundos % 3600) / 60);
+    $segundosRestantes = $segundos % 60;
+
+    if ($horas > 0) {
+        return sprintf("%02d:%02d:%02d", $horas, $minutos, $segundosRestantes);
+    }
+
+    return sprintf("%02d:%02d", $minutos, $segundosRestantes);
+}
+
+function medirRede() {
+    $interface = "enp0s31f6";
+    $rxMbps = 0;
+    $txMbps = 0;
+
+    $rxFile = "/sys/class/net/$interface/statistics/rx_bytes";
+    $txFile = "/sys/class/net/$interface/statistics/tx_bytes";
+
+    if (is_readable($rxFile) && is_readable($txFile)) {
+        $rx1 = intval(trim(file_get_contents($rxFile)));
+        $tx1 = intval(trim(file_get_contents($txFile)));
+
+        usleep(1000000);
+
+        $rx2 = intval(trim(file_get_contents($rxFile)));
+        $tx2 = intval(trim(file_get_contents($txFile)));
+
+        $rxBytes = max(0, $rx2 - $rx1);
+        $txBytes = max(0, $tx2 - $tx1);
+
+        $rxMbps = round(($rxBytes * 8) / 1024 / 1024, 2);
+        $txMbps = round(($txBytes * 8) / 1024 / 1024, 2);
+    }
+
+    return [
+        'rxMbps' => $rxMbps,
+        'txMbps' => $txMbps,
+        'interface' => $interface
+    ];
+}
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'rede') {
+    header('Content-Type: application/json');
+    echo json_encode(medirRede());
     exit;
 }
 
-$canais = $conn->query("SELECT * FROM canais ORDER BY id DESC");
-$host = $_SERVER['HTTP_HOST'];
+/* =========================
+   START / STOP / DELETE
+========================= */
 
-// leitura do log nginx (últimas linhas)
-$log_file = "/var/log/nginx/iptv.log";
-$log_linhas = [];
+if (isset($_GET['start'])) {
+    $canal = basename($_GET['start']);
+    $dir = "$base_dir/Tokusatsu/$canal";
 
-if(file_exists($log_file)){
-    $log_linhas = @array_slice(file($log_file), -300);
+    if (file_exists("$dir/playlist.txt")) {
+        shell_exec("pkill -f " . escapeshellarg("$dir/playlist.m3u8"));
+
+        shell_exec("find " . escapeshellarg($dir) . " -maxdepth 1 -name 'playlist*.ts' -delete");
+        shell_exec("rm -f " . escapeshellarg("$dir/playlist.m3u8"));
+
+        $script = "while true; do " .
+            "ffmpeg -hide_banner -loglevel warning " .
+            "-re -stream_loop -1 " .
+            "-f concat -safe 0 " .
+            "-i " . escapeshellarg("$dir/playlist.txt") . " " .
+            "-fflags +genpts " .
+            "-avoid_negative_ts make_zero " .
+            "-c copy " .
+            "-f hls " .
+            "-hls_time 10 " .
+            "-hls_list_size 6 " .
+            "-hls_flags delete_segments+omit_endlist+independent_segments " .
+            "-hls_segment_filename " . escapeshellarg("$dir/playlist%d.ts") . " " .
+            escapeshellarg("$dir/playlist.m3u8") . " " .
+            ">> " . escapeshellarg("$dir/ffmpeg.log") . " 2>&1; " .
+            "sleep 3; " .
+            "done";
+
+        file_put_contents("$dir/started_at.txt", time());
+
+        $cmd = "nohup bash -c " . escapeshellarg($script) . " > /dev/null 2>&1 &";
+        shell_exec($cmd);
+    }
+
+    header("Location: index.php");
+    exit;
+}
+
+if (isset($_GET['stop'])) {
+    $canal = basename($_GET['stop']);
+    $dir = "$base_dir/Tokusatsu/$canal";
+
+    shell_exec("pkill -f " . escapeshellarg("$dir/playlist.m3u8"));
+    @unlink("$dir/started_at.txt");
+
+    header("Location: index.php");
+    exit;
+}
+
+if (isset($_GET['delete'])) {
+    $canal = basename($_GET['delete']);
+    $dir = "$base_dir/Tokusatsu/$canal";
+
+    shell_exec("pkill -f " . escapeshellarg("$dir/playlist.m3u8"));
+    @unlink("$dir/started_at.txt");
+
+    header("Location: index.php");
+    exit;
+}
+
+/* =========================
+   INFORMAÇÕES DO SISTEMA
+========================= */
+
+$cpuLoad = sys_getloadavg();
+$nproc = intval(shell_exec("nproc"));
+$cpuPercent = round($cpuLoad[0] * 100 / max(1, $nproc));
+
+$meminfo = file_get_contents("/proc/meminfo");
+preg_match('/MemTotal:\s+(\d+)/', $meminfo, $totalMem);
+preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $availMem);
+
+$totalRam = isset($totalMem[1]) ? round($totalMem[1] / 1024 / 1024, 2) : 0;
+$usedRam = isset($totalMem[1], $availMem[1]) ? round(($totalMem[1] - $availMem[1]) / 1024 / 1024, 2) : 0;
+$ramPercent = $totalRam > 0 ? round(($usedRam / $totalRam) * 100) : 0;
+
+$diskTotal = disk_total_space("/");
+$diskFree = disk_free_space("/");
+$diskUsed = $diskTotal - $diskFree;
+$diskPercent = $diskTotal > 0 ? round(($diskUsed / $diskTotal) * 100) : 0;
+
+$rede = medirRede();
+$rxMbps = $rede['rxMbps'];
+$txMbps = $rede['txMbps'];
+
+/* =========================
+   CANAIS
+========================= */
+
+if (is_dir($base_dir)) {
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($base_dir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($iterator as $file) {
+        if (!$file->isDir()) {
+            continue;
+        }
+
+        $canal_path = $file->getPathname();
+
+        if (preg_match('#/(cache|logs|playlists|videos)$#', $canal_path)) {
+            continue;
+        }
+
+        $playlist_file = "$canal_path/playlist.m3u8";
+        $playlist_txt = "$canal_path/playlist.txt";
+
+        if (!file_exists($playlist_file) && !file_exists($playlist_txt)) {
+            continue;
+        }
+
+        $canal = basename($canal_path);
+        $categoria = basename(dirname($canal_path));
+
+        $dominio = $_SERVER['HTTP_HOST'];
+        $playlist_web = "http://$dominio/live/" . str_replace('/home/drmpremium/', '', $canal_path) . "/playlist.m3u8";
+
+        $processo = shell_exec("pgrep -af ffmpeg | grep " . escapeshellarg($playlist_file) . " | grep -v grep");
+        $playlistAtualizada = file_exists($playlist_file) && (time() - filemtime($playlist_file) <= 60);
+
+        $status = (!empty($processo) || $playlistAtualizada) ? "Online" : "Offline";
+        $uptime = "Offline";
+        $startedAt = 0;
+
+        if ($status === "Online") {
+            $startedFile = "$canal_path/started_at.txt";
+
+            if (file_exists($startedFile)) {
+                $startedAt = intval(file_get_contents($startedFile));
+            } elseif (file_exists($playlist_file)) {
+                $startedAt = filemtime($playlist_file);
+            }
+
+            $uptime = $startedAt > 0 ? formatarUptime(time() - $startedAt) : "Online";
+        }
+
+        $conexoes = intval(shell_exec("lsof -i :80 | grep playlist.m3u8 | grep " . escapeshellarg($canal) . " | wc -l"));
+
+        $canais[] = [
+            'nome' => $canal,
+            'categoria' => $categoria,
+            'playlist' => $playlist_web,
+            'status' => $status,
+            'uptime' => $uptime,
+            'started_at' => $startedAt,
+            'conexoes' => $conexoes
+        ];
+    }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
 <meta charset="UTF-8">
-<title>Painel IPTV</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="30">
+<title>DRM Premium Dashboard</title>
 
 <style>
-body{margin:0;background:#0f1115;color:#fff;font-family:Arial;}
-
-.topo{
-    background:#111;
-    padding:15px;
-    display:flex;
-    justify-content:space-between;
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0a0f1c;
+    color: white;
 }
 
-.logo{color:#ff2a2a;font-weight:bold;}
-
-.btn{
-    background:#ff2a2a;
-    padding:8px 12px;
-    border-radius:5px;
-    color:#fff;
-    text-decoration:none;
-    margin-left:5px;
+.sidebar {
+    width: 250px;
+    height: 100vh;
+    background: #111827;
+    position: fixed;
+    left: 0;
+    top: 0;
+    padding-top: 20px;
+    border-right: 1px solid rgba(255,255,255,0.08);
 }
 
-.container{display:flex;padding:20px;}
-
-.canais{
-    flex:1;
-    display:flex;
-    flex-wrap:wrap;
-    gap:15px;
+.sidebar h2 {
+    text-align: center;
+    color: #5b7cff;
+    margin-bottom: 30px;
 }
 
-.card{
-    background:#1a1d23;
-    padding:15px;
-    border-radius:10px;
-    width:260px;
+.sidebar a {
+    display: block;
+    color: white;
+    padding: 15px 25px;
+    text-decoration: none;
+    transition: 0.3s;
 }
 
-button{
-    margin-top:5px;
-    padding:6px;
-    background:#ff2a2a;
-    border:none;
-    color:#fff;
-    border-radius:5px;
-    cursor:pointer;
+.sidebar a:hover {
+    background: #5b7cff;
 }
 
-input{
-    width:100%;
-    padding:5px;
-    border-radius:5px;
-    border:none;
-    margin-top:5px;
+.main {
+    margin-left: 250px;
+    padding: 30px;
 }
 
-/* MONITOR */
-.monitor{
-    width:300px;
-    background:#2c323a;
-    padding:20px;
-    border-radius:10px;
-    margin-left:20px;
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #111827;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 25px;
 }
 
-.line{margin-bottom:15px;}
-.line span{font-size:12px;color:#ccc;}
-
-.bar{
-    width:100%;
-    height:10px;
-    background:#444;
-    border-radius:5px;
-    margin-top:5px;
+.btn-refresh,
+.baixar-global {
+    color: white;
+    padding: 12px 20px;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: bold;
 }
 
-.bar div{
-    height:100%;
-    width:0%;
-    background:#00c896;
-    border-radius:5px;
+.btn-refresh {
+    background: #10b981;
 }
 
-small{word-break:break-all;}
+.baixar-global {
+    background: #00c853;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(250px,1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.card,
+.canal {
+    background: #111827;
+    padding: 25px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.card h3 {
+    margin-top: 0;
+    color: #5b7cff;
+}
+
+.card .value {
+    font-size: 30px;
+    font-weight: bold;
+    margin: 15px 0;
+}
+
+.grid-canais {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(320px,1fr));
+    gap: 20px;
+}
+
+.canal h2 {
+    color: #00ff99;
+}
+
+.online {
+    color: lime;
+    font-weight: bold;
+}
+
+.offline {
+    color: red;
+    font-weight: bold;
+}
+
+.acoes {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.linha-acoes {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 10px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    transition: 0.3s;
+    display: inline-block;
+}
+
+.btn:hover {
+    opacity: 0.85;
+}
+
+.assistir {
+    background: #2563eb;
+}
+
+.baixar {
+    background: #00c853;
+}
+
+.excluir {
+    background: #dc2626;
+}
+
+.iniciar {
+    background: #16a34a;
+}
+
+.parar {
+    background: #f59e0b;
+}
 </style>
-
-<script>
-function acao(url){
-    fetch(url).then(()=>location.reload());
-}
-
-function editarNome(id){
-    document.getElementById("view"+id).style.display="none";
-    document.getElementById("edit"+id).style.display="block";
-}
-
-function salvarNome(id){
-    let nome = document.getElementById("nome"+id).value;
-
-    fetch("editar_canal.php", {
-        method:"POST",
-        headers:{"Content-Type":"application/x-www-form-urlencoded"},
-        body:"id="+id+"&nome="+encodeURIComponent(nome)
-    }).then(()=>location.reload());
-}
-
-// MONITOR
-function atualizarMonitor(){
-    fetch("monitor.php")
-    .then(r=>r.json())
-    .then(d=>{
-
-        document.getElementById("cpu_txt").innerText = d.cpu+"%";
-        document.getElementById("ram_txt").innerText = d.ram+"%";
-        document.getElementById("disk_txt").innerText = d.disk+"%";
-        document.getElementById("up_txt").innerText = d.up+" Mbps";
-        document.getElementById("down_txt").innerText = d.down+" Mbps";
-        document.getElementById("users_txt").innerText = d.users;
-
-        document.getElementById("cpu_bar").style.width = d.cpu+"%";
-        document.getElementById("ram_bar").style.width = d.ram+"%";
-        document.getElementById("disk_bar").style.width = d.disk+"%";
-
-        document.getElementById("up_bar").style.width = Math.min(d.up,100)+"%";
-        document.getElementById("down_bar").style.width = Math.min(d.down,100)+"%";
-
-        let maxUsers = 1000;
-
-        let percent = (d.users / maxUsers) * 100;
-        percent = Math.min(percent, 100);
-
-       document.getElementById("users_bar").style.width = percent + "%";
-       });
-}
-
-setInterval(atualizarMonitor,2000);
-window.onload = atualizarMonitor;
-</script>
-
 </head>
 <body>
 
-<div class="topo">
-    <div class="logo">🔥 PAINEL IPTV PRO</div>
-    <div>
-        <a class="btn" href="arquivos.php">Criar Canal</a>
-        <a class="btn" href="usuarios.php">Usuários</a> 
-        <a class="btn" href="usuarios_iptv.php">IPTV Usuários</a>
-        <a class="btn" href="perfil.php">Perfil</a>
-        <a class="btn" href="logout.php">Sair</a>
+<div class="sidebar">
+    <h2>DRM PREMIUM</h2>
+    <a href="index.php">Dashboard</a>
+    <a href="canais.php">Criar Canal</a>
+    <a href="conexoes.php">Conexões Ativas</a>
+    <a href="perfil.php">Perfil</a>
+    <a href="logout.php">Sair</a>
+</div>
+
+<div class="main">
+
+    <div class="header">
+        <div>
+            <h1>Dashboard</h1>
+            <p>Visão geral do sistema em tempo real</p>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+            <a href="gerar_m3u.php" class="btn baixar-global">⬇ Baixar M3U</a>
+            <a href="index.php" class="btn-refresh">Atualizar</a>
+        </div>
     </div>
+
+    <div class="cards">
+        <div class="card">
+            <h3>CPU</h3>
+            <div class="value"><?= $cpuPercent ?>%</div>
+            <p>Uso atual do processador</p>
+        </div>
+
+        <div class="card">
+            <h3>RAM</h3>
+            <div class="value"><?= $ramPercent ?>%</div>
+            <p><?= $usedRam ?> GB / <?= $totalRam ?> GB</p>
+        </div>
+
+        <div class="card">
+            <h3>Disco</h3>
+            <div class="value"><?= $diskPercent ?>%</div>
+            <p><?= round($diskUsed / 1024 / 1024 / 1024) ?> GB usados</p>
+        </div>
+
+        <div class="card">
+            <h3>Rede</h3>
+            <div class="value">
+                <span id="rxMbps"><?= $rxMbps ?></span> Mbps ↓ /
+                <span id="txMbps"><?= $txMbps ?></span> Mbps ↑
+            </div>
+            <p>Uso atual de banda</p>
+        </div>
+    </div>
+
+    <h2>Meus Canais</h2>
+
+    <div class="grid-canais">
+        <?php foreach ($canais as $canal): ?>
+            <div class="canal">
+                <h2><?= htmlspecialchars($canal['nome']) ?></h2>
+
+                <p>Status:
+                    <span class="<?= $canal['status'] === 'Online' ? 'online' : 'offline' ?>">
+                        <?= $canal['status'] ?>
+                    </span>
+                </p>
+
+                <p>
+                    Uptime:
+                    <strong class="uptime"
+                            data-started="<?= intval($canal['started_at']) ?>"
+                            data-status="<?= htmlspecialchars($canal['status']) ?>">
+                        <?= htmlspecialchars($canal['uptime']) ?>
+                    </strong>
+                </p>
+
+                <p>Conexões Ativas: <strong><?= intval($canal['conexoes']) ?></strong></p>
+
+                <div class="acoes">
+                    <div class="linha-acoes">
+                        <a class="btn iniciar" href="?start=<?= urlencode($canal['nome']) ?>">▶ Iniciar</a>
+                        <a class="btn parar" href="?stop=<?= urlencode($canal['nome']) ?>">⏹ Parar</a>
+                    </div>
+
+                    <div class="linha-acoes">
+                        <a class="btn assistir" href="<?= htmlspecialchars($canal['playlist']) ?>" target="_blank">▶ Assistir</a>
+
+                        <a class="btn excluir"
+                           href="?delete=<?= urlencode($canal['nome']) ?>"
+                           onclick="return confirm('Deseja remover/parar este canal da lista ativa?')">
+                            ✖ Excluir
+                        </a>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
+
 </div>
 
-<div class="container">
+<script>
+function formatarUptime(segundos) {
+    segundos = Math.max(0, parseInt(segundos, 10) || 0);
 
-<div class="canais">
+    const horas = Math.floor(segundos / 3600);
+    const minutos = Math.floor((segundos % 3600) / 60);
+    const segundosRestantes = segundos % 60;
+    const dois = valor => String(valor).padStart(2, '0');
 
-<?php while($c = $canais->fetch_assoc()): ?>
-
-<?php
-$ips = [];
-if (!empty($log_linhas)) {
-    foreach($log_linhas as $l){
-        $p = explode("|", $l);
-        if(count($p) < 2) continue;
-
-        $ip = trim($p[0]);
-        $url = trim($p[1]);
-
-        // Verifica conexões para este canal específico
-        if(strpos($url, "/live/canais/".$c['id']."/") !== false){
-            $ips[$ip] = true;
-        }
+    if (horas > 0) {
+        return `${dois(horas)}:${dois(minutos)}:${dois(segundosRestantes)}`;
     }
+
+    return `${dois(minutos)}:${dois(segundosRestantes)}`;
 }
-$conexoes = count($ips);
-?>
 
-<div class="card">
+function atualizarUptimes() {
+    const agora = Math.floor(Date.now() / 1000);
 
-<div id="view<?= $c['id'] ?>">
-    <b><?= htmlspecialchars($c['nome']) ?></b><br>
-    <button onclick="editarNome(<?= $c['id'] ?>)">Editar Nome</button>
-</div>
+    document.querySelectorAll('.uptime').forEach(el => {
+        const status = el.dataset.status;
+        const started = parseInt(el.dataset.started, 10) || 0;
 
-<div id="edit<?= $c['id'] ?>" style="display:none;">
-    <input type="text" id="nome<?= $c['id'] ?>" value="<?= htmlspecialchars($c['nome']) ?>">
-    <button onclick="salvarNome(<?= $c['id'] ?>)">Salvar</button>
-</div>
+        if (status !== 'Online' || started <= 0) {
+            el.textContent = 'Offline';
+            return;
+        }
 
-<br>
+        el.textContent = formatarUptime(agora - started);
+    });
+}
 
-<?php if($c['status'] == 'on'): ?>
-    Status: <span style="color:#00ff88;font-size:18px;">●</span> <b>ONLINE</b><br>
-<?php else: ?>
-    Status: <span style="color:#ff3b3b;font-size:18px;">●</span> <b>OFFLINE</b><br>
-<?php endif; ?>
-👥 Conexões: <?= $conexoes ?><br><br>
+async function atualizarRede() {
+    try {
+        const resp = await fetch('index.php?ajax=rede&_=' + Date.now(), {
+            cache: 'no-store'
+        });
 
-<button onclick="acao('start.php?id=<?= $c['id'] ?>')">▶ Start</button>
-<button onclick="acao('stop.php?id=<?= $c['id'] ?>')">⏹ Stop</button>
-<button onclick="acao('delete.php?id=<?= $c['id'] ?>')">Excluir</button>
+        const data = await resp.json();
 
-<a class="btn" 
-   href="/normalizar.php?canal=<?= urlencode($c['nome']) ?>" 
-   target="_blank" 
-   style="background:#8b5cf6; display:block; text-align:center; margin-top:5px; font-size:12px;">
-   🛠 Normalizar
-</a>
+        document.getElementById('rxMbps').textContent = data.rxMbps;
+        document.getElementById('txMbps').textContent = data.txMbps;
+    } catch (e) {}
+}
 
-<br><br>
+atualizarUptimes();
+atualizarRede();
 
-<small>http://<?= $host ?>/live/canais/<?= $c['id'] ?>/index.m3u8</small>
-
-</div>
-
-<?php endwhile; ?>
-
-</div>
-
-<!-- MONITOR -->
-<div class="monitor">
-
-<div class="line">
-<span>CPU <b id="cpu_txt">0%</b></span>
-<div class="bar"><div id="cpu_bar"></div></div>
-</div>
-
-<div class="line">
-<span>RAM <b id="ram_txt">0%</b></span>
-<div class="bar"><div id="ram_bar"></div></div>
-</div>
-
-<div class="line">
-<span>DISK <b id="disk_txt">0%</b></span>
-<div class="bar"><div id="disk_bar"></div></div>
-</div>
-
-<div class="line">
-<span>UPLOAD <b id="up_txt">0 Mbps</b></span>
-<div class="bar"><div id="up_bar"></div></div>
-</div>
-
-<div class="line">
-<span>DOWNLOAD <b id="down_txt">0 Mbps</b></span>
-<div class="bar"><div id="down_bar"></div></div>
-</div>
-
-<div class="line">
-<span>CONEXÕES <b id="users_txt">0</b></span>
-<div class="bar"><div id="users_bar"></div></div>
-</div>
-
-</div>
-
-</div>
+setInterval(atualizarUptimes, 1000);
+setInterval(atualizarRede, 1000);
+</script>
 
 </body>
 </html>

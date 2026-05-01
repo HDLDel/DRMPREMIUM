@@ -7,19 +7,34 @@ if (!$canal) {
     die("Canal não informado.");
 }
 
-$base_dir = "/home/drmpremium/canais";
-$stream_base = "/live";
+$base_dir = "/home/drmpremium";
+$stream_base = "/canais";
 
 $stream = null;
 
-// Busca o stream ativo na pasta de canais do sistema
-$id_canal = intval($_GET['id'] ?? 0);
-$pasta_canal = $base_dir . "/" . $id_canal;
+/*
+ Procura o canal em qualquer categoria dentro de /home/drmpremium
+ Ex:
+ /home/drmpremium/Tokusatsu/Bicrossers (1985)
+ /home/drmpremium/Filmes/Canal X
+*/
+$pastas = glob($base_dir . "/*/" . $canal);
 
-if (is_dir($pasta_canal)) {
-    $arquivos = glob($pasta_canal . "/*.m3u8");
+if (!$pastas) {
+    die("Canal não encontrado.");
+}
+
+foreach ($pastas as $pasta_canal) {
+    $arquivos = glob($pasta_canal . "/playlist*.ts");
+
     if (!empty($arquivos)) {
-        $stream = "/live/canais/$id_canal/index.m3u8";
+        rsort($arquivos); // último segmento disponível
+        $arquivo = $arquivos[0];
+
+        $relative = str_replace($base_dir, $stream_base, $arquivo);
+        $stream = implode('/', array_map('rawurlencode', explode('/', $relative)));
+
+        break;
     }
 }
 
@@ -79,7 +94,7 @@ if (!$stream) {
     <h1><?= htmlspecialchars($canal) ?></h1>
 
     <video controls autoplay>
-        <source src="<?= htmlspecialchars($stream) ?>" type="application/x-mpegURL">
+        <source src="<?= htmlspecialchars($stream) ?>" type="video/mp2t">
         Seu navegador não suporta vídeo.
     </video>
 

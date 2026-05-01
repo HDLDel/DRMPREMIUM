@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         @unlink($canal_dir . '/ffmpeg.log');
 
         // Cria playlist.txt corretamente
-        $fp = fopen($playlist_txt, 'w') or die("Erro ao criar playlist em $playlist_txt");
+        $fp = fopen($playlist_txt, 'w');
 
         foreach ($selecionados as $video) {
             if (file_exists($video)) {
@@ -72,9 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Comando FFmpeg leve
         $cmd = "nohup ffmpeg -re -stream_loop -1 -f concat -safe 0 -i "
             . escapeshellarg($playlist_txt)
-            . " -fflags +genpts "
-            . " -avoid_negative_ts make_zero "
-            . " -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p "
+            . " -c:v copy "
             . "-c:a aac -b:a 128k "
             . "-bsf:v h264_mp4toannexb "
             . "-f hls "
@@ -224,7 +222,7 @@ function toggleSelectAll(source) {
 <div class="main">
     <div class="card">
         <h1>Criar Novo Canal</h1>
-        <p>Navegue pelas pastas dentro de <b>/home/drmpremium</b> para selecionar os vídeos do acervo.</p>
+        <p>Navegue pelas pastas dentro de /home/drmpremium, escolha uma subpasta específica e selecione apenas os vídeos dela.</p>
 
         <?php if ($msg): ?>
             <div class="msg"><?= htmlspecialchars($msg) ?></div>
