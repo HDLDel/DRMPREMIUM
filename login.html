@@ -30,7 +30,10 @@
             box-shadow: 0 8px 24px rgba(0,0,0,0.5);
             text-align: center;
         }
-        h2 { margin-bottom: 25px; color: var(--accent); }
+        .logo { font-size: 3em; color: var(--accent); margin-bottom: 10px; }
+        h2 { margin-bottom: 10px; color: var(--text); }
+        .subtitle { font-size: 0.9em; color: #8b949e; margin-bottom: 25px; }
+
         input {
             width: 100%;
             padding: 12px;
@@ -39,6 +42,10 @@
             border: 1px solid var(--border);
             background: #0d1117;
             color: white;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus {
+            border-color: var(--accent);
             box-sizing: border-box;
         }
         button {
@@ -51,14 +58,17 @@
             font-weight: bold;
             cursor: pointer;
             transition: 0.2s;
+            box-shadow: 0 4px 10px rgba(0, 255, 153, 0.2);
         }
-        button:hover { opacity: 0.9; transform: translateY(-1px); }
+        button:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(0, 255, 153, 0.3); }
         .error { color: #ff4444; font-size: 0.9em; margin-bottom: 15px; display: none; }
     </style>
 </head>
 <body>
     <div class="login-card">
-        <h2>IPTV Pro Login</h2>
+        <div class="logo">📺</div> <!-- Ícone simples como placeholder -->
+        <h2>DRM PREMIUM 24 HORAS</h2>
+        <p class="subtitle">Acesse seu painel de controle</p>
         <div id="error-msg" class="error">Usuário ou senha inválidos.</div>
         <input type="text" id="user" placeholder="Usuário">
         <input type="password" id="pass" placeholder="Senha">
