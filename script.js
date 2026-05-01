@@ -50,6 +50,14 @@ async function stop(id) {
     }
 }
 
+function formatUptime(seconds) {
+    if (!seconds || seconds <= 0) return '00:00:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 // Function to load and render channels
 async function loadAndRenderChannels() {
     try {
@@ -59,7 +67,7 @@ async function loadAndRenderChannels() {
         tableBody.innerHTML = ''; // Clear existing rows
 
         if (channels.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhum canal configurado. Crie um novo!</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Nenhum canal configurado. Crie um novo!</td></tr>';
             return;
         }
 
@@ -69,6 +77,7 @@ async function loadAndRenderChannels() {
             row.insertCell().innerText = channel.name;
             const statusCell = row.insertCell();
             statusCell.innerHTML = `<span style="color: ${channel.status === 'online' ? '#00ff99' : '#ff4444'}">${channel.status.toUpperCase()}</span>`;
+            row.insertCell().innerText = channel.status === 'online' ? formatUptime(channel.uptime) : '-';
             const actionsCell = row.insertCell();
             
             const streamUrl = `/canais/${channel.id}/index.m3u8`;

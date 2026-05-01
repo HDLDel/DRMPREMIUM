@@ -7,7 +7,7 @@ const os = require('os');
 const PORT = 3000;
 const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
-const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv.log';
+const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv_access.log';
 
 // No Windows, se o ffmpeg não estiver no PATH, coloque o caminho completo aqui.
 // Exemplo: 'C:\\ffmpeg\\bin\\ffmpeg.exe'
@@ -98,17 +98,24 @@ async function isVideoValid(filePath) {
  */
 function getDiskUsage() {
     return new Promise((resolve) => {
-        if (process.platform !== 'win32') return resolve(0);
-        exec('wmic logicaldisk where "DeviceID=\'C:\'" get size,freespace /format:list', (err, stdout) => {
-            if (err) return resolve(0);
-            const lines = stdout.split('\n');
-            let free = 0, total = 0;
-            lines.forEach(l => {
-                if (l.startsWith('FreeSpace=')) free = parseInt(l.split('=')[1]);
-                if (l.startsWith('Size=')) total = parseInt(l.split('=')[1]);
+        if (process.platform === 'win32') {
+            exec('wmic logicaldisk where "DeviceID=\'C:\'" get size,freespace /format:list', (err, stdout) => {
+                if (err) return resolve(0);
+                const lines = stdout.split('\n');
+                let free = 0, total = 0;
+                lines.forEach(l => {
+                    if (l.startsWith('FreeSpace=')) free = parseInt(l.split('=')[1]);
+                    if (l.startsWith('Size=')) total = parseInt(l.split('=')[1]);
+                });
+                resolve(total ? Math.round(((total - free) / total) * 100) : 0);
             });
-            resolve(total ? Math.round(((total - free) / total) * 100) : 0);
-        });
+        } else {
+            // Suporte para Linux (Ubuntu) usando o comando df
+            exec("df / --output=pcent | tail -1", (err, stdout) => {
+                if (err) return resolve(0);
+                resolve(parseInt(stdout.trim()) || 0);
+            });
+        }
     });
 }
 
@@ -117,24 +124,45 @@ function getDiskUsage() {
  */
 function getNetworkUsage() {
     return new Promise((resolve) => {
-        if (process.platform !== 'win32') return resolve(0);
-        exec('netstat -e', (err, stdout) => {
-            if (err) return resolve(0);
-            const match = stdout.match(/Bytes\s+(\d+)\s+(\d+)/);
-            if (match) {
-                const sent = parseInt(match[2]);
+        if (process.platform === 'win32') {
+            exec('netstat -e', (err, stdout) => {
+                if (err) return resolve(0);
+                const match = stdout.match(/Bytes\s+(\d+)\s+(\d+)/);
+                if (match) {
+                    const sent = parseInt(match[2]);
+                    const now = Date.now();
+                    const deltaSec = (now - lastNetTime) / 1000;
+                    const deltaBytes = sent - prevBytesSent;
+                    
+                    prevBytesSent = sent;
+                    lastNetTime = now;
+
+                    const mbps = ((deltaBytes * 8) / (1024 * 1024)) / deltaSec;
+                    resolve(mbps.toFixed(2));
+                } else resolve(0);
+            });
+        } else {
+            // Suporte para Linux (Ubuntu) lendo estatísticas de /proc/net/dev
+            fs.readFile('/proc/net/dev', 'utf8', (err, data) => {
+                if (err) return resolve(0);
+                const lines = data.split('\n');
+                let totalSent = 0;
+                lines.forEach(line => {
+                    if (line.includes(':')) {
+                        const parts = line.trim().split(/\s+/);
+                        totalSent += parseInt(parts[9]) || 0; // Transmit bytes
+                    }
+                });
+
                 const now = Date.now();
                 const deltaSec = (now - lastNetTime) / 1000;
-                const deltaBytes = sent - prevBytesSent;
-                
-                prevBytesSent = sent;
+                const deltaBytes = totalSent - prevBytesSent;
+                prevBytesSent = totalSent;
                 lastNetTime = now;
-
-                // Retorna Mbps (Bytes para bits / 1024 / 1024)
                 const mbps = ((deltaBytes * 8) / (1024 * 1024)) / deltaSec;
-                resolve(mbps.toFixed(2));
-            } else resolve(0);
-        });
+                resolve(mbps > 0 ? mbps.toFixed(2) : "0.00");
+            });
+        }
     });
 }
 
@@ -255,8 +283,15 @@ const server = http.createServer(async (req, res) => {
 
     // API: Listar todos os canais
     if (url.pathname === '/api/channels') {
+        const channelsWithUptime = channels.map(c => {
+            const stream = activeStreams.get(c.id);
+            return {
+                ...c,
+                uptime: stream ? Math.floor((Date.now() - stream.startedAt) / 1000) : 0
+            };
+        });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(channels));
+        return res.end(JSON.stringify(channelsWithUptime));
     }
 
     // API: Listar pastas e subpastas para o Select do Modal
