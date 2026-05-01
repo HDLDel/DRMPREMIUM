@@ -211,14 +211,45 @@ async function getSystemStats() {
 /**
  * Inicia um canal (Substitui o start.php)
  */
-function startChannel(id) {
+function startChannel(id, useRam = false) {
     const channel = channels.find(c => c.id === id);
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
     const playlistPath = channel.playlistFilePath; // Use the stored playlist path for the channel
-    const outputDir = path.join(CHANNELS_DIR, id.toString());
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    const diskPath = path.join(CHANNELS_DIR, id.toString());
+    const ramPath = path.join('/dev/shm', 'canais', id.toString());
+    let outputDir = diskPath;
+
+    // Lógica de RAM Disk (tmpfs)
+    if (useRam) {
+        try {
+            // Garante que a pasta base na RAM existe
+            if (!fs.existsSync('/dev/shm/canais')) fs.mkdirSync('/dev/shm/canais', { recursive: true });
+            if (!fs.existsSync(ramPath)) fs.mkdirSync(ramPath, { recursive: true });
+
+            // Remove pasta física ou link antigo para criar o link simbólico novo
+            if (fs.existsSync(diskPath)) {
+                fs.rmSync(diskPath, { recursive: true, force: true });
+            }
+            
+            // Cria o link simbólico: Disco -> RAM
+            fs.symlinkSync(ramPath, diskPath, 'dir');
+            outputDir = ramPath;
+            channel.useRam = true;
+            console.log(`[RAM MODE] Canal ${id} configurado para rodar em /dev/shm`);
+        } catch (err) {
+            console.error(`[ERRO RAM] Falha ao criar link simbólico:`, err);
+            return { status: 'error', message: 'Falha ao configurar Modo RAM' };
+        }
+    } else {
+        // Se não for RAM, garante que o diskPath é uma pasta real e não um link
+        if (fs.existsSync(diskPath) && fs.lstatSync(diskPath).isSymbolicLink()) {
+            fs.unlinkSync(diskPath);
+        }
+        if (!fs.existsSync(diskPath)) fs.mkdirSync(diskPath, { recursive: true });
+        channel.useRam = false;
+    }
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
     const args = [
@@ -351,7 +382,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const data = JSON.parse(body);
-            const result = startChannel(Number(data.id)); 
+            const result = startChannel(Number(data.id), !!data.useRam); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
         });
@@ -479,17 +510,17 @@ const server = http.createServer(async (req, res) => {
 
             // 3. Limpa arquivos físicos
             const channelPath = path.join(CHANNELS_DIR, id.toString());
-            if (fs.existsSync(channelPath)) {
-                // Adiciona um pequeno atraso para permitir que o SO libere os locks de arquivos, especialmente no Windows.
-                setTimeout(() => {
-                    try {
-                        fs.rmSync(channelPath, { recursive: true, force: true });
-                        console.log(`Diretório do canal ${id} removido com sucesso.`);
-                    } catch (rmErr) {
-                        console.error(`[ERRO] Falha ao remover diretório do canal ${id}:`, rmErr);
-                    }
-                }, 500); // Atraso de 500ms
-            }
+            const ramPath = path.join('/dev/shm', 'canais', id.toString());
+
+            setTimeout(() => {
+                try {
+                    fs.rmSync(channelPath, { recursive: true, force: true });
+                    fs.rmSync(ramPath, { recursive: true, force: true });
+                    console.log(`Limpeza completa do canal ${id} realizada.`);
+                } catch (rmErr) {
+                    console.error(`[ERRO] Falha ao remover diretório do canal ${id}:`, rmErr);
+                }
+            }, 1000);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'deleted' }));
@@ -576,7 +607,7 @@ server.listen(PORT, async () => {
     channels.forEach(channel => {
         if (channel.status === 'online') {
             console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
-            startChannel(channel.id);
+            startChannel(channel.id, !!channel.useRam);
         }
     });
 

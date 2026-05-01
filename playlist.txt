@@ -1,0 +1,6 @@
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E01.mp4'
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E02.mp4'
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E03.mp4'
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E04.mp4'
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E05.mp4'
+file 'C:/Users/hilde/Dev/DRMPREMIUM/PAINEL24HORAS/24HORAS/bicrossers1985/Senhor dos Céus (2013) S08E06.mp4'
