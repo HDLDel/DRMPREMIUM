@@ -255,6 +255,7 @@ function startChannel(id) {
         if (ch) {
             ch.status = 'offline';
             delete ch.startedAt;
+            saveChannels();
         }
         activeStreams.delete(id);
     });
@@ -288,7 +289,7 @@ function startChannel(id) {
         startedAt: channel.startedAt
     });
     channel.status = 'online'; // Update channel status
-    saveChannels(); // Persiste o status e o timestamp de início
+    saveChannels();
 
     return { status: 'success', pid: ffmpeg.pid };
 }

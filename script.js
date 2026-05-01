@@ -101,6 +101,7 @@ async function loadAndRenderChannels() {
 }
 
 async function deleteChannel(id, status) {
+    // Bloqueio preventivo no frontend para evitar erros de permissão (EPERM)
     if (status === 'online') {
         alert('Atenção: Você deve PARAR o canal antes de tentar excluí-lo.');
         return;
