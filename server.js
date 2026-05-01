@@ -235,7 +235,7 @@ function startChannel(id) {
 
     args.push(
         '-avoid_negative_ts', 'make_zero',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
+        '-c:v', 'copy',
         '-c:a', 'aac', '-b:a', '128k',
         '-f', 'hls', '-hls_time', '4', '-hls_list_size', '6',
         '-hls_flags', 'delete_segments+append_list+omit_endlist',
