@@ -236,7 +236,7 @@ function startChannel(id) {
     args.push(
         '-avoid_negative_ts', 'make_zero',
         '-c:v', 'copy',
-        '-c:a', 'aac', '-b:a', '128k',
+        '-c:a', 'copy',
         '-f', 'hls', '-hls_time', '4', '-hls_list_size', '6',
         '-hls_flags', 'delete_segments+append_list+omit_endlist',
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
