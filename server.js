@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 
 const PORT = 8080;
 const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
@@ -16,7 +17,8 @@ const FFMPEG_PATH = 'ffmpeg';
 // Configurações de Acesso
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123';
-const SESSION_ID = 'iptv_sess_8822'; // Token simples de sessão
+// Gera um ID de sessão aleatório e seguro a cada inicialização do servidor
+const SESSION_ID = crypto.randomBytes(32).toString('hex');
 
 const CHANNELS_DB_FILE = path.join(__dirname, 'channels.json');
 
