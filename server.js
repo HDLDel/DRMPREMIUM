@@ -4,7 +4,7 @@ const path = require('path');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 
-const PORT = 3000;
+const PORT = 8080;
 const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
 const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv_access.log';
