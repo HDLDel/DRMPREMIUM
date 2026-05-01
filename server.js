@@ -246,7 +246,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const data = JSON.parse(body);
-            const result = startChannel(data.id); // Call startChannel with only ID
+            const result = startChannel(Number(data.id)); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
         });
@@ -354,12 +354,12 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             const data = JSON.parse(body);
-            const id = data.id;
+            const id = Number(data.id);
 
-            // 1. Para o processo se estiver rodando
+            // 1. Segurança: Não permite excluir se estiver rodando
             if (activeStreams.has(id)) {
-                activeStreams.get(id).process.kill('SIGKILL');
-                activeStreams.delete(id);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de excluí-lo.' }));
             }
 
             // 2. Remove da lista e salva banco
@@ -368,7 +368,17 @@ const server = http.createServer(async (req, res) => {
 
             // 3. Limpa arquivos físicos
             const channelPath = path.join(CHANNELS_DIR, id.toString());
-            if (fs.existsSync(channelPath)) fs.rmSync(channelPath, { recursive: true, force: true });
+            if (fs.existsSync(channelPath)) {
+                // Adiciona um pequeno atraso para permitir que o SO libere os locks de arquivos, especialmente no Windows.
+                setTimeout(() => {
+                    try {
+                        fs.rmSync(channelPath, { recursive: true, force: true });
+                        console.log(`Diretório do canal ${id} removido com sucesso.`);
+                    } catch (rmErr) {
+                        console.error(`[ERRO] Falha ao remover diretório do canal ${id}:`, rmErr);
+                    }
+                }, 500); // Atraso de 500ms
+            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'deleted' }));
@@ -381,9 +391,14 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const data = JSON.parse(body);
-            if (activeStreams.has(data.id)) {
-                activeStreams.get(data.id).process.kill('SIGKILL');
-                activeStreams.delete(data.id);
+            const id = Number(data.id);
+            
+            const channel = channels.find(c => c.id === id);
+            if (channel) channel.status = 'offline';
+
+            if (activeStreams.has(id)) {
+                activeStreams.get(id).process.kill('SIGKILL');
+                activeStreams.delete(id);
             }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'stopped' }));

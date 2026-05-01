@@ -76,13 +76,13 @@ async function loadAndRenderChannels() {
             if (channel.status === 'offline') {
                 actionsCell.innerHTML = `
                     <button onclick="start(${channel.id})" title="Iniciar">▶ Iniciar</button>
-                    <button class="btn-delete" onclick="deleteChannel(${channel.id})" title="Excluir">✖ Excluir</button>
+                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
             } else {
                 actionsCell.innerHTML = `
                     <button class="stop" onclick="stop(${channel.id})" title="Parar">⏹ Parar</button>
                     <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
-                    <button class="btn-delete" onclick="deleteChannel(${channel.id})" title="Excluir">✖ Excluir</button>
+                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
             }
         });
@@ -91,14 +91,26 @@ async function loadAndRenderChannels() {
     }
 }
 
-async function deleteChannel(id) {
+async function deleteChannel(id, status) {
+    if (status === 'online') {
+        alert('Atenção: Você deve PARAR o canal antes de tentar excluí-lo.');
+        return;
+    }
+
     if (!confirm('Tem certeza que deseja excluir este canal e todos os seus arquivos temporários?')) return;
     try {
-        await fetch('/api/delete', {
+        const res = await fetch('/api/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
+
+        if (!res.ok) {
+            const errorData = await res.json();
+            alert(`Erro: ${errorData.message}`);
+            return;
+        }
+
         updateStats(); // Isso forçará a atualização da lista de canais
     } catch (err) {
         console.error('Erro ao excluir canal:', err);

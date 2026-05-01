@@ -41,3 +41,5 @@ Respostas Simples e Proatividade Restrita: Para dúvidas gerais ou pedidos que e
 Proibido Edição Automática: Não edite arquivos do projeto antecipadamente. Você pode ser proativa ao sugerir e explicar melhorias, mas DEVE OBRIGATORIAMENTE perguntar se pode aplicar a correção, parar e AGUARDAR a minha autorização antes de modificar qualquer arquivo.
 
 Mapeamento de Contexto: Ao iniciar uma nova sessão, liste a estrutura de arquivos do projeto silenciosamente ou no chat para que você tenha o contexto exato da localização de cada arquivo para futuras consultas ou alterações.
+
+sempre que eu colar no chat "erro gemini" entenda que deu este erro "The code change produced by Gemini cannot be automatically applied. You can manually apply the change or ask Gemini to try again." e tente reaplicar a correção.
