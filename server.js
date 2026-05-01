@@ -13,6 +13,11 @@ const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.lo
 // Exemplo: 'C:\\ffmpeg\\bin\\ffmpeg.exe'
 const FFMPEG_PATH = 'ffmpeg'; 
 
+// Configurações de Acesso
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = 'admin123';
+const SESSION_ID = 'iptv_sess_8822'; // Token simples de sessão
+
 const CHANNELS_DB_FILE = path.join(__dirname, 'channels.json');
 
 // Global array to hold channel configurations
@@ -22,6 +27,18 @@ let nextChannelId = 1; // Simple ID counter
 // Variáveis para cálculo de rede
 let prevBytesSent = 0;
 let lastNetTime = Date.now();
+
+function getCookies(req) {
+    const list = {};
+    const rc = req.headers.cookie;
+    if (rc) {
+        rc.split(';').forEach(cookie => {
+            const parts = cookie.split('=');
+            list[parts.shift().trim()] = decodeURI(parts.join('='));
+        });
+    }
+    return list;
+}
 
 async function loadChannels() {
     if (fs.existsSync(CHANNELS_DB_FILE)) {
@@ -232,8 +249,14 @@ function startChannel(id) {
         if (err.code === 'ENOENT') {
             console.error('Certifique-se de que o FFmpeg está instalado e configurado no PATH do Windows ou defina o caminho manual no server.js');
         }
+        
+        // Se houver erro ao iniciar, limpamos os dados de tempo
+        const ch = channels.find(c => c.id === id);
+        if (ch) {
+            ch.status = 'offline';
+            delete ch.startedAt;
+        }
         activeStreams.delete(id);
-        channel.status = 'offline';
     });
 
     ffmpeg.stderr.on('data', (data) => {
@@ -244,14 +267,28 @@ function startChannel(id) {
     ffmpeg.on('close', (code) => {
         console.log(`Canal ${id} (${channel.name}) parou com código ${code}`);
         activeStreams.delete(id);
-        channel.status = 'offline'; // Update channel status
+        
+        // Atualiza o objeto do canal para persistência
+        const ch = channels.find(c => c.id === id);
+        if (ch) {
+            ch.status = 'offline';
+            delete ch.startedAt;
+            saveChannels();
+        }
     });
+
+    // Se o canal já tem um startedAt (ex: veio do banco no reboot), mantemos.
+    // Caso contrário, definimos agora.
+    if (!channel.startedAt) {
+        channel.startedAt = Date.now();
+    }
 
     activeStreams.set(id, {
         process: ffmpeg,
-        startedAt: Date.now()
+        startedAt: channel.startedAt
     });
     channel.status = 'online'; // Update channel status
+    saveChannels(); // Persiste o status e o timestamp de início
 
     return { status: 'success', pid: ffmpeg.pid };
 }
@@ -261,6 +298,36 @@ function startChannel(id) {
  */
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+
+    // 1. Verificação de Autenticação
+    const cookies = getCookies(req);
+    const isAuth = cookies['session_token'] === SESSION_ID;
+
+    // Rota pública de login
+    if (url.pathname === '/api/login' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            const { user, pass } = JSON.parse(body);
+            if (user === ADMIN_USER && pass === ADMIN_PASS) {
+                res.writeHead(200, { 
+                    'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
+                    'Content-Type': 'application/json' 
+                });
+                res.end(JSON.stringify({ status: 'success' }));
+            } else {
+                res.writeHead(401);
+                res.end(JSON.stringify({ status: 'error' }));
+            }
+        });
+        return;
+    }
+
+    // Redireciona para login se não estiver autenticado
+    if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
+        res.writeHead(302, { 'Location': '/login.html' });
+        return res.end();
+    }
 
     // Roteamento de API
     if (url.pathname === '/api/status') {
@@ -284,10 +351,9 @@ const server = http.createServer(async (req, res) => {
     // API: Listar todos os canais
     if (url.pathname === '/api/channels') {
         const channelsWithUptime = channels.map(c => {
-            const stream = activeStreams.get(c.id);
             return {
                 ...c,
-                uptime: stream ? Math.floor((Date.now() - stream.startedAt) / 1000) : 0
+                uptime: (c.status === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
             };
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -488,7 +554,16 @@ setInterval(() => {
     });
 }, 15000);
 
-server.listen(PORT, () => {
-    loadChannels(); // Load channels on startup
+server.listen(PORT, async () => {
+    await loadChannels(); // Load channels on startup
+    
+    // Auto-start: Verifica canais que deveriam estar online e inicia o FFmpeg
+    channels.forEach(channel => {
+        if (channel.status === 'online') {
+            console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
+            startChannel(channel.id);
+        }
+    });
+
     console.log(`IPTV Pro Node rodando em http://localhost:${PORT}`);
 });
