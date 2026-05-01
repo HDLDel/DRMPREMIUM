@@ -278,11 +278,8 @@ function startChannel(id) {
         }
     });
 
-    // Se o canal já tem um startedAt (ex: veio do banco no reboot), mantemos.
-    // Caso contrário, definimos agora.
-    if (!channel.startedAt) {
-        channel.startedAt = Date.now();
-    }
+    // Resetamos o uptime para o momento exato do início do processo atual
+    channel.startedAt = Date.now();
 
     activeStreams.set(id, {
         process: ffmpeg,
