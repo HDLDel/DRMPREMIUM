@@ -31,7 +31,7 @@ async function logout() {
     }
 }
 
-async function start(id) { // Removed 'nome' as it's part of the channel object now
+async function start(id) { 
     try {
         const res = await fetch('/api/start', {
             method: 'POST',
@@ -88,11 +88,12 @@ async function loadAndRenderChannels() {
             const row = tableBody.insertRow();
             row.insertCell().innerText = channel.id;
             row.insertCell().innerText = channel.name;
+            
             const statusCell = row.insertCell();
             statusCell.innerHTML = `<span style="color: ${channel.status === 'online' ? '#00ff99' : '#ff4444'}">${channel.status.toUpperCase()}</span>`;
+            
             row.insertCell().innerText = channel.status === 'online' ? formatUptime(channel.uptime) : '-';
             const actionsCell = row.insertCell();
-            
             const streamUrl = `/canais/${channel.id}/index.m3u8`;
 
             if (channel.status === 'offline') {

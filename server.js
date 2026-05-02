@@ -197,7 +197,7 @@ async function getSystemStats() {
     const cpu = process.platform === 'win32' ? 0 : Math.round((load[0] / os.cpus().length) * 100);
     const disco = await getDiskUsage();
     const rede = await getNetworkUsage();
-
+    
     return {
         cpu: cpu,
         ram: Math.round(((totalMem - freeMem) / totalMem) * 100),
@@ -211,45 +211,14 @@ async function getSystemStats() {
 /**
  * Inicia um canal (Substitui o start.php)
  */
-function startChannel(id, useRam = false) {
+function startChannel(id) {
     const channel = channels.find(c => c.id === id);
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
     const playlistPath = channel.playlistFilePath; // Use the stored playlist path for the channel
-    const diskPath = path.join(CHANNELS_DIR, id.toString());
-    const ramPath = path.join('/dev/shm', 'canais', id.toString());
-    let outputDir = diskPath;
-
-    // Lógica de RAM Disk (tmpfs)
-    if (useRam) {
-        try {
-            // Garante que a pasta base na RAM existe
-            if (!fs.existsSync('/dev/shm/canais')) fs.mkdirSync('/dev/shm/canais', { recursive: true });
-            if (!fs.existsSync(ramPath)) fs.mkdirSync(ramPath, { recursive: true });
-
-            // Remove pasta física ou link antigo para criar o link simbólico novo
-            if (fs.existsSync(diskPath)) {
-                fs.rmSync(diskPath, { recursive: true, force: true });
-            }
-            
-            // Cria o link simbólico: Disco -> RAM
-            fs.symlinkSync(ramPath, diskPath, 'dir');
-            outputDir = ramPath;
-            channel.useRam = true;
-            console.log(`[RAM MODE] Canal ${id} configurado para rodar em /dev/shm`);
-        } catch (err) {
-            console.error(`[ERRO RAM] Falha ao criar link simbólico:`, err);
-            return { status: 'error', message: 'Falha ao configurar Modo RAM' };
-        }
-    } else {
-        // Se não for RAM, garante que o diskPath é uma pasta real e não um link
-        if (fs.existsSync(diskPath) && fs.lstatSync(diskPath).isSymbolicLink()) {
-            fs.unlinkSync(diskPath);
-        }
-        if (!fs.existsSync(diskPath)) fs.mkdirSync(diskPath, { recursive: true });
-        channel.useRam = false;
-    }
+    const outputDir = path.join(CHANNELS_DIR, id.toString());
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
     const args = [
@@ -382,7 +351,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const data = JSON.parse(body);
-            const result = startChannel(Number(data.id), !!data.useRam); 
+            const result = startChannel(Number(data.id)); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
         });
@@ -510,15 +479,14 @@ const server = http.createServer(async (req, res) => {
 
             // 3. Limpa arquivos físicos
             const channelPath = path.join(CHANNELS_DIR, id.toString());
-            const ramPath = path.join('/dev/shm', 'canais', id.toString());
 
+            // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
             setTimeout(() => {
                 try {
                     fs.rmSync(channelPath, { recursive: true, force: true });
-                    fs.rmSync(ramPath, { recursive: true, force: true });
-                    console.log(`Limpeza completa do canal ${id} realizada.`);
+                    console.log(`[LIMPEZA] Canal ${id} removido do disco.`);
                 } catch (rmErr) {
-                    console.error(`[ERRO] Falha ao remover diretório do canal ${id}:`, rmErr);
+                    console.error(`[ERRO] Falha na remoção do canal ${id}:`, rmErr);
                 }
             }, 1000);
 
@@ -564,7 +532,14 @@ const server = http.createServer(async (req, res) => {
                 '.m3u8': 'application/vnd.apple.mpegurl',
                 '.ts': 'video/MP2T'
             };
-            res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
+            
+            const headers = { 'Content-Type': types[ext] || 'text/plain' };
+            // Impede que o navegador faça cache do painel (Dashboard)
+            if (ext === '.js' || ext === '.css' || ext === '.html') {
+                headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+            }
+
+            res.writeHead(200, headers);
             res.end(content);
         }
     });
@@ -607,9 +582,11 @@ server.listen(PORT, async () => {
     channels.forEach(channel => {
         if (channel.status === 'online') {
             console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
-            startChannel(channel.id, !!channel.useRam);
+            startChannel(channel.id);
         }
     });
 
-    console.log(`IPTV Pro Node rodando em http://localhost:${PORT}`);
+    console.log(`\n=== IPTV PRO DASHBOARD ===`);
+    console.log(`Servidor rodando em: http://localhost:${PORT}`);
+    console.log(`Diretório ativo: ${__dirname}\n`);
 });
