@@ -9,8 +9,6 @@ const bcrypt = require('bcryptjs');
 const PORT = 8080;
 
 // Se for Linux, usa o /dev/shm (RAM Disk) para evitar I/O de disco
-const CHANNELS_DIR = process.platform === 'linux' 
-    ? '/dev/shm/iptv_canais' 
 const CHANNELS_DIR = (process.platform === 'linux' || fs.existsSync('/dev/shm'))
     ? '/dev/shm/iptv_canais'
     : path.join(__dirname, 'canais');
@@ -662,13 +660,13 @@ setInterval(() => {
             const stats = fs.statSync(m3u8Path);
             const segundosDesdeMod = (Date.now() - stats.mtimeMs) / 1000;
             
-            if (segundosDesdeMod > 90) { // Aumentado para 90s pois os segmentos agora têm 15s
-                console.log(`[WATCHDOG] Canal ${id} (${channel.name}) parece travado. Reiniciando...`);
+            if (segundosDesdeMod > 120) { // Aumentado para 120s para evitar falsos positivos com segmentos de 15s
+                console.log(`[WATCHDOG] Canal ${id} (${channel.name}) sem resposta há ${Math.round(segundosDesdeMod)}s. Reiniciando...`);
                 
                 // Registra o travamento no log antes de matar o processo
                 const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
                 if (fs.existsSync(logPath)) {
-                    fs.appendFileSync(logPath, `[WATCHDOG] ${new Date().toLocaleString()}: Canal detectado como travado. Forçando reinício.\n`);
+                    fs.appendFileSync(logPath, `[WATCHDOG] ${new Date().toLocaleString()}: Canal parado por ${Math.round(segundosDesdeMod)}s. Forçando reinício.\n`);
                 }
 
                 info.process.kill('SIGKILL');
