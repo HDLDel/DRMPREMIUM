@@ -27,7 +27,7 @@ Se o comando modificar arquivos de configuração, instalar software, alterar pe
 3. **PEÇA PERMISSÃO:** Pergunte explicitamente: "Posso aplicar esta correção nos arquivos?".
 4. **PARE E AGUARDE:** Não modifique nenhum arquivo, não gere blocos de código gigantes e não use ferramentas de edição. Aguarde a minha resposta de autorização ("sim", "pode fazer", etc.).
 5. **APLIQUE E DOCUMENTE:** Apenas após a minha autorização explícita, aplique a modificação no arquivo.
-6. **MENSAGEM DE COMMIT:** Após aplicar a alteração, forneça sempre um resumo conciso das mudanças (pronto para ser usado como mensagem de commit no Git).
+6. **MENSAGEM DE COMMIT:** Após aplicar a alteração, forneça em portugues sempre um resumo conciso das mudanças (pronto para ser usado como mensagem de commit no Git).
 
 ## ⚠️ TRATAMENTO DE ERROS DO SISTEMA
 Sempre que eu enviar a exata frase **"erro gemini"**, compreenda que o sistema retornou a mensagem: *"The code change produced by Gemini cannot be automatically applied. You can manually apply the change or ask Gemini to try again."*

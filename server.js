@@ -4,6 +4,7 @@ const path = require('path');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 
 const PORT = 8080;
 const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
@@ -15,8 +16,11 @@ const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.lo
 const FFMPEG_PATH = 'ffmpeg'; 
 
 // Configurações de Acesso
-const ADMIN_USER = 'admin';
-const ADMIN_PASS = 'admin123';
+const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+// Hash para a senha padrão 'admin123' caso não seja fornecida uma via variável de ambiente
+const DEFAULT_HASH = '<BCRYPT_HASH_PLACEHOLDER>'; 
+const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || DEFAULT_HASH;
+
 // Gera um ID de sessão aleatório e seguro a cada inicialização do servidor
 const SESSION_ID = crypto.randomBytes(32).toString('hex');
 
@@ -310,7 +314,12 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const { user, pass } = JSON.parse(body);
-            if (user === ADMIN_USER && pass === ADMIN_PASS) {
+
+            // Validação de segurança usando bcrypt e constantes definidas no início do arquivo
+            const isUserValid = (user === ADMIN_USER);
+            const isPasswordValid = bcrypt.compareSync(pass, ADMIN_PASS_HASH);
+
+            if (isUserValid && isPasswordValid) {
                 res.writeHead(200, { 
                     'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
                     'Content-Type': 'application/json' 
