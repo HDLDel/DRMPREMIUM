@@ -8,10 +8,11 @@ const bcrypt = require('bcryptjs');
 
 const PORT = 8080;
 
-// Se for Linux, usa o /dev/shm (RAM Disk) para evitar I/O de disco
-const CHANNELS_DIR = (process.platform === 'linux' || fs.existsSync('/dev/shm'))
-    ? '/dev/shm/iptv_canais'
-    : path.join(__dirname, 'canais');
+// No Linux Ubuntu, usamos obrigatoriamente o RAM Disk (/dev/shm) para os segmentos HLS
+const CHANNELS_DIR = '/dev/shm/iptv_canais';
+if (!fs.existsSync(CHANNELS_DIR)) fs.mkdirSync(CHANNELS_DIR, { recursive: true });
+
+console.log(`[SYSTEM] Armazenamento de segmentos configurado em: ${CHANNELS_DIR}`);
 
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
 const LOGS_DIR = path.join(__dirname, 'logs'); // Pasta para logs do FFmpeg
@@ -20,10 +21,8 @@ const LOGS_DIR = path.join(__dirname, 'logs'); // Pasta para logs do FFmpeg
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
 if (!fs.existsSync(CHANNELS_DIR)) fs.mkdirSync(CHANNELS_DIR, { recursive: true });
 
-const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv_access.log';
+const NGINX_LOG = '/var/log/nginx/iptv_access.log';
 
-// No Windows, se o ffmpeg não estiver no PATH, coloque o caminho completo aqui.
-// Exemplo: 'C:\\ffmpeg\\bin\\ffmpeg.exe'
 const FFMPEG_PATH = 'ffmpeg'; 
 
 // Lista de Administradores com hashes seguros (bcrypt)
@@ -123,6 +122,7 @@ function isVideoValid(filePath) {
             '-of', 'default=noprint_wrappers=1:nokey=1', filePath
         ]);
         ff.on('close', (code) => {
+            if (code !== 0) console.warn(`[VALIDAÇÃO] Falha ao ler metadados do vídeo: ${filePath}`);
             resolve(code === 0);
         });
     });
@@ -133,24 +133,11 @@ function isVideoValid(filePath) {
  */
 function getDiskUsage() {
     return new Promise((resolve) => {
-        if (process.platform === 'win32') {
-            exec('wmic logicaldisk where "DeviceID=\'C:\'" get size,freespace /format:list', (err, stdout) => {
-                if (err) return resolve(0);
-                const lines = stdout.split('\n');
-                let free = 0, total = 0;
-                lines.forEach(l => {
-                    if (l.startsWith('FreeSpace=')) free = parseInt(l.split('=')[1]);
-                    if (l.startsWith('Size=')) total = parseInt(l.split('=')[1]);
-                });
-                resolve(total ? Math.round(((total - free) / total) * 100) : 0);
-            });
-        } else {
-            // Suporte para Linux (Ubuntu) usando o comando df
-            exec("df / --output=pcent | tail -1", (err, stdout) => {
-                if (err) return resolve(0);
-                resolve(parseInt(stdout.trim()) || 0);
-            });
-        }
+        // Suporte para Linux (Ubuntu) usando o comando df
+        exec("df / --output=pcent | tail -1", (err, stdout) => {
+            if (err) return resolve(0);
+            resolve(parseInt(stdout.trim()) || 0);
+        });
     });
 }
 
@@ -159,45 +146,26 @@ function getDiskUsage() {
  */
 function getNetworkUsage() {
     return new Promise((resolve) => {
-        if (process.platform === 'win32') {
-            exec('netstat -e', (err, stdout) => {
-                if (err) return resolve(0);
-                const match = stdout.match(/Bytes\s+(\d+)\s+(\d+)/);
-                if (match) {
-                    const sent = parseInt(match[2]);
-                    const now = Date.now();
-                    const deltaSec = (now - lastNetTime) / 1000;
-                    const deltaBytes = sent - prevBytesSent;
-                    
-                    prevBytesSent = sent;
-                    lastNetTime = now;
-
-                    const mbps = ((deltaBytes * 8) / (1024 * 1024)) / deltaSec;
-                    resolve(mbps.toFixed(2));
-                } else resolve(0);
+        // Suporte para Linux (Ubuntu) lendo estatísticas de /proc/net/dev
+        fs.readFile('/proc/net/dev', 'utf8', (err, data) => {
+            if (err) return resolve(0);
+            const lines = data.split('\n');
+            let totalSent = 0;
+            lines.forEach(line => {
+                if (line.includes(':')) {
+                    const parts = line.trim().split(/\s+/);
+                    totalSent += parseInt(parts[9]) || 0; // Transmit bytes
+                }
             });
-        } else {
-            // Suporte para Linux (Ubuntu) lendo estatísticas de /proc/net/dev
-            fs.readFile('/proc/net/dev', 'utf8', (err, data) => {
-                if (err) return resolve(0);
-                const lines = data.split('\n');
-                let totalSent = 0;
-                lines.forEach(line => {
-                    if (line.includes(':')) {
-                        const parts = line.trim().split(/\s+/);
-                        totalSent += parseInt(parts[9]) || 0; // Transmit bytes
-                    }
-                });
 
-                const now = Date.now();
-                const deltaSec = (now - lastNetTime) / 1000;
-                const deltaBytes = totalSent - prevBytesSent;
-                prevBytesSent = totalSent;
-                lastNetTime = now;
-                const mbps = ((deltaBytes * 8) / (1024 * 1024)) / deltaSec;
-                resolve(mbps > 0 ? mbps.toFixed(2) : "0.00");
-            });
-        }
+            const now = Date.now();
+            const deltaSec = (now - lastNetTime) / 1000;
+            const deltaBytes = totalSent - prevBytesSent;
+            prevBytesSent = totalSent;
+            lastNetTime = now;
+            const mbps = ((deltaBytes * 8) / (1024 * 1024)) / deltaSec;
+            resolve(mbps > 0 ? mbps.toFixed(2) : "0.00");
+        });
     });
 }
 
@@ -208,9 +176,8 @@ async function getSystemStats() {
     const load = os.loadavg();
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
-    
-    // No Windows, os.loadavg() sempre retorna [0, 0, 0]. No Linux funciona normalmente.
-    const cpu = process.platform === 'win32' ? 0 : Math.round((load[0] / os.cpus().length) * 100);
+
+    const cpu = Math.round((load[0] / os.cpus().length) * 100);
     const disco = await getDiskUsage();
     const rede = await getNetworkUsage();
     
@@ -268,8 +235,8 @@ async function startChannel(id) {
 
         playlistPath = path.join(outputDir, 'playlist.txt');
         const playlistContent = mp4Files.map(f => {
-            // Garante barras de Linux e escapa aspas simples para o formato concat do ffmpeg
-            const escaped = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
+            // Escapa aspas simples para o formato concat do ffmpeg
+            const escaped = f.replace(/'/g, "'\\''");
             return `file '${escaped}'`;
         }).join('\r\n');
         
@@ -319,10 +286,6 @@ async function startChannel(id) {
         const errMsg = `[ERRO CRÍTICO] Falha ao iniciar FFmpeg no canal ${id}: ${err.message}\n`;
         console.error(errMsg);
         logStream.write(errMsg);
-
-        if (err.code === 'ENOENT') {
-            console.error('Certifique-se de que o FFmpeg está instalado e configurado no PATH do Windows ou defina o caminho manual no server.js');
-        }
         
         // Se houver erro ao iniciar, limpamos os dados de tempo
         const ch = channels.find(c => c.id === id);
@@ -539,7 +502,7 @@ const server = http.createServer(async (req, res) => {
                     const playlistPath = path.join(channelOutputDir, 'playlist.txt');
                     // Melhora a compatibilidade com caminhos complexos e aspas simples
                     const playlistContent = mp4Files.map(f => {
-                        const escaped = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
+                        const escaped = f.replace(/'/g, "'\\''");
                         return `file '${escaped}'`;
                     }).join('\r\n');
                     
