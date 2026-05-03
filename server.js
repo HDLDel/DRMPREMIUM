@@ -279,8 +279,22 @@ function startChannel(id) {
     });
 
     ffmpeg.stderr.on('data', (data) => {
-        // Grava o erro no arquivo de log do canal
-        logStream.write(data);
+        const message = data.toString();
+        // Filtra para gravar apenas erros reais e não o progresso de bitrate/tempo
+        const lowerMsg = message.toLowerCase();
+        if (
+            lowerMsg.includes('error') || 
+            lowerMsg.includes('fatal') || 
+            lowerMsg.includes('invalid') || 
+            lowerMsg.includes('failed') ||
+            lowerMsg.includes('not found')
+        ) {
+            logStream.write(`[FFMPEG] ${message}`);
+        }
+    });
+
+    ffmpeg.stderr.on('error', (err) => {
+        logStream.write(`[SYSTEM ERROR] Falha ao ler stderr: ${err.message}\n`);
     });
 
     ffmpeg.on('close', (code) => {
@@ -528,12 +542,14 @@ const server = http.createServer(async (req, res) => {
 
             // 3. Limpa arquivos físicos
             const channelPath = path.join(CHANNELS_DIR, id.toString());
+            const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
 
             // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
             setTimeout(() => {
                 try {
-                    fs.rmSync(channelPath, { recursive: true, force: true });
-                    console.log(`[LIMPEZA] Canal ${id} removido do disco.`);
+                    if (fs.existsSync(channelPath)) fs.rmSync(channelPath, { recursive: true, force: true });
+                    if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+                    console.log(`[LIMPEZA] Canal e logs de ${id} removidos.`);
                 } catch (rmErr) {
                     console.error(`[ERRO] Falha na remoção do canal ${id}:`, rmErr);
                 }
@@ -616,6 +632,13 @@ setInterval(() => {
             
             if (segundosDesdeMod > 25) { // Canal travado há mais de 25 segundos
                 console.log(`[WATCHDOG] Canal ${id} (${channel.name}) parece travado. Reiniciando...`);
+                
+                // Registra o travamento no log antes de matar o processo
+                const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
+                if (fs.existsSync(logPath)) {
+                    fs.appendFileSync(logPath, `[WATCHDOG] ${new Date().toLocaleString()}: Canal detectado como travado. Forçando reinício.\n`);
+                }
+
                 info.process.kill('SIGKILL');
                 activeStreams.delete(id);
                 setTimeout(() => startChannel(id), 2000);
@@ -623,6 +646,26 @@ setInterval(() => {
         }
     });
 }, 15000);
+
+/**
+ * Rotina de Limpeza de Logs (Executa a cada 48 horas)
+ */
+setInterval(() => {
+    const agora = Date.now();
+    const limite = 48 * 60 * 60 * 1000; // 48 horas em ms
+
+    fs.readdir(LOGS_DIR, (err, files) => {
+        if (err) return console.error("[LIMPEZA] Erro ao ler pasta de logs:", err);
+        files.forEach(file => {
+            const filePath = path.join(LOGS_DIR, file);
+            fs.stat(filePath, (err, stats) => {
+                if (!err && (agora - stats.mtimeMs > limite)) {
+                    fs.unlink(filePath, () => console.log(`[LIMPEZA] Log antigo removido: ${file}`));
+                }
+            });
+        });
+    });
+}, 48 * 60 * 60 * 1000);
 
 server.listen(PORT, async () => {
     await loadChannels(); // Load channels on startup
