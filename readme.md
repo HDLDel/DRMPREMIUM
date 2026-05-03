@@ -36,3 +36,14 @@ ADMIN_USER=meuusuario ADMIN_PASS=minhasenha pm2 restart iptv-pro
 node -e "console.log(require('bcryptjs').hashSync('<REDACTED_PASSWORD>', 10))"
 
 
+ls -lh /dev/shm/iptv_canais/21
+
+ls -lh /dev/shm/iptv_canais
+
+ls -ld /home/drmpremium/canais/*
+
+
+
+
+
+

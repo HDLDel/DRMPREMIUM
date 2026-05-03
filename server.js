@@ -7,12 +7,18 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
 const PORT = 8080;
-const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
+
+// Se for Linux, usa o /dev/shm (RAM Disk) para evitar I/O de disco
+const CHANNELS_DIR = process.platform === 'linux' 
+    ? '/dev/shm/iptv_canais' 
+    : path.join(__dirname, 'canais');
+
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
 const LOGS_DIR = path.join(__dirname, 'logs'); // Pasta para logs do FFmpeg
 
-// Garante que a pasta de logs existe
+// Garante que as pastas necessárias existem
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+if (!fs.existsSync(CHANNELS_DIR)) fs.mkdirSync(CHANNELS_DIR, { recursive: true });
 
 const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv_access.log';
 
@@ -630,7 +636,7 @@ setInterval(() => {
             const stats = fs.statSync(m3u8Path);
             const segundosDesdeMod = (Date.now() - stats.mtimeMs) / 1000;
             
-            if (segundosDesdeMod > 25) { // Canal travado há mais de 25 segundos
+            if (segundosDesdeMod > 45) { // Aumentado para 45s para tolerar lentidão de I/O ou processamento
                 console.log(`[WATCHDOG] Canal ${id} (${channel.name}) parece travado. Reiniciando...`);
                 
                 // Registra o travamento no log antes de matar o processo
