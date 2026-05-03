@@ -64,6 +64,11 @@ button.stop {
     color: white;
 }
 
+.btn-logs {
+    background: #6e7681;
+    color: white;
+}
+
 .btn-delete {
     background: #30363d;
     color: #ff4444;

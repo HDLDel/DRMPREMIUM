@@ -9,6 +9,11 @@ const bcrypt = require('bcryptjs');
 const PORT = 8080;
 const CHANNELS_DIR = path.join(__dirname, 'canais'); // Pasta onde os .m3u8 e playlists dos canais serão gerados
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
+const LOGS_DIR = path.join(__dirname, 'logs'); // Pasta para logs do FFmpeg
+
+// Garante que a pasta de logs existe
+if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+
 const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.log') : '/var/log/nginx/iptv_access.log';
 
 // No Windows, se o ffmpeg não estiver no PATH, coloque o caminho completo aqui.
@@ -249,9 +254,16 @@ function startChannel(id) {
 
     const ffmpeg = spawn(FFMPEG_PATH, args);
 
+    // Prepara o stream de log para este canal
+    const logStream = fs.createWriteStream(path.join(LOGS_DIR, `canal_${id}.log`), { flags: 'a' });
+    logStream.write(`\n--- INICIANDO CANAL ${id} EM ${new Date().toLocaleString()} ---\n`);
+
     // Tratamento de erro para evitar que o Node.js trave (crash)
     ffmpeg.on('error', (err) => {
-        console.error(`[ERRO CRÍTICO] Falha ao iniciar FFmpeg no canal ${id}:`, err.message);
+        const errMsg = `[ERRO CRÍTICO] Falha ao iniciar FFmpeg no canal ${id}: ${err.message}\n`;
+        console.error(errMsg);
+        logStream.write(errMsg);
+
         if (err.code === 'ENOENT') {
             console.error('Certifique-se de que o FFmpeg está instalado e configurado no PATH do Windows ou defina o caminho manual no server.js');
         }
@@ -267,11 +279,15 @@ function startChannel(id) {
     });
 
     ffmpeg.stderr.on('data', (data) => {
-        // Log de depuração do FFmpeg. Útil para identificar problemas de transcodificação.
-        console.error(`FFmpeg [${id}] stderr: ${data.toString()}`);
+        // Grava o erro no arquivo de log do canal
+        logStream.write(data);
     });
 
     ffmpeg.on('close', (code) => {
+        const closeMsg = `Canal ${id} parou com código ${code} em ${new Date().toLocaleString()}\n`;
+        logStream.write(closeMsg);
+        logStream.end();
+
         console.log(`Canal ${id} (${channel.name}) parou com código ${code}`);
         activeStreams.delete(id);
         
@@ -360,6 +376,23 @@ const server = http.createServer(async (req, res) => {
         const stats = await getSystemStats();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(stats));
+    }
+
+    // API: Buscar Logs de um canal
+    if (url.pathname === '/api/logs' && req.method === 'GET') {
+        const id = url.searchParams.get('id');
+        const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
+        
+        if (fs.existsSync(logPath)) {
+            // Lê apenas os últimos 5KB do log para não sobrecarregar
+            const stats = fs.statSync(logPath);
+            const start = Math.max(0, stats.size - 5120);
+            const stream = fs.createReadStream(logPath, { start });
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            return stream.pipe(res);
+        }
+        res.writeHead(404);
+        return res.end("Log não encontrado.");
     }
 
     if (url.pathname === '/api/start' && req.method === 'POST') {

@@ -44,6 +44,7 @@ async function start(id) {
         //     alert(`Erro: ${result.message}`);
         // }
         updateStats();
+        loadAndRenderChannels();
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
     }
@@ -57,6 +58,7 @@ async function stop(id) {
             body: JSON.stringify({ id })
         });
         updateStats(); // This will also call loadAndRenderChannels
+        loadAndRenderChannels();
     } catch (err) {
         console.error('Erro ao parar canal:', err);
     }
@@ -98,12 +100,14 @@ async function loadAndRenderChannels() {
             if (channel.status === 'offline') {
                 actionsCell.innerHTML = `
                     <button onclick="start(${channel.id})" title="Iniciar">▶ Iniciar</button>
+                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
                     <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
             } else {
                 actionsCell.innerHTML = `
                     <button class="stop" onclick="stop(${channel.id})" title="Parar">⏹ Parar</button>
                     <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
+                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
                     <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
             }
@@ -111,6 +115,31 @@ async function loadAndRenderChannels() {
     } catch (err) {
         console.error('Erro ao carregar canais:', err);
     }
+}
+
+async function viewLogs(id, name) {
+    const modal = document.getElementById('logs-modal');
+    const content = document.getElementById('log-content');
+    document.getElementById('log-modal-title').innerText = `Logs: ${name}`;
+    
+    content.innerText = 'Carregando logs...';
+    modal.style.display = 'flex';
+
+    try {
+        const res = await fetch(`/api/logs?id=${id}`);
+        if (res.ok) {
+            content.innerText = await res.text();
+            content.scrollTop = content.scrollHeight;
+        } else {
+            content.innerText = 'Nenhum log disponível para este canal ainda.';
+        }
+    } catch (err) {
+        content.innerText = 'Erro ao carregar logs do servidor.';
+    }
+}
+
+function hideLogsModal() {
+    document.getElementById('logs-modal').style.display = 'none';
 }
 
 async function deleteChannel(id, status) {
@@ -135,6 +164,7 @@ async function deleteChannel(id, status) {
         }
 
         updateStats(); // Isso forçará a atualização da lista de canais
+        loadAndRenderChannels();
     } catch (err) {
         console.error('Erro ao excluir canal:', err);
         alert('Erro ao excluir o canal.');
@@ -207,6 +237,7 @@ async function createChannel() {
 }
 
 // Atualização automática dos gráficos de hardware
-setInterval(updateStats, 3000);
+setInterval(updateStats, 5000);
+setInterval(loadAndRenderChannels, 10000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load
