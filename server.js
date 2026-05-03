@@ -251,11 +251,12 @@ async function startChannel(id) {
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
     const args = [
-        '-fflags', '+genpts+igndts', // Gera e ignora timestamps problemáticos
+        '-fflags', '+genpts+igndts+flush_packets', // Gera e limpa pacotes problemáticos
         '-err_detect', 'ignore_err',  // Ignora erros de dados para não parar o processo
         '-re',
         '-stream_loop', '-1'
     ];
+    args.push('-vsync', '0'); // Evita que o FFmpeg tente compensar gaps de tempo com frames extras
 
     if (channel.inputType === 'concat') {
         args.push('-f', 'concat', '-safe', '0');
@@ -269,7 +270,7 @@ async function startChannel(id) {
         '-c:v', 'copy',
         '-c:a', 'copy',
         '-f', 'hls', '-hls_time', '15', '-hls_list_size', '6',
-        '-hls_flags', 'delete_segments+append_list+omit_endlist',
+        '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
         path.join(outputDir, 'index.m3u8')
     );

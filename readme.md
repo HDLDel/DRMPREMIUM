@@ -50,6 +50,15 @@ ls -lh /dev/shm/iptv_canais
 ls -ld /home/drmpremium/canais/*
 
 
+monitoramento
+
+ps -fp $(pgrep -f "iptv_canais/5/") >> canal5.txt
+
+
+while true; do date >> canal5_full_monitor.txt; ps -fp $(pgrep -f "iptv_canais/5/") >> canal5_full_monitor.txt 2>&1; echo "--------------------------------" >> canal5_full_monitor.txt; sleep 5; done
+
+
+
 
 
 
