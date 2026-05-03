@@ -5,6 +5,12 @@ Scripts de Deploy/Servidor: install_ubuntu.sh, update_nginx.sh, nginx_iptv.conf.
 Dados e Logs: playlist.txt, grok_logs.csv.
 
 
+O que procurar no Log:
+
+Non-matching parameters in input streams: Confirmaria que os vídeos da pasta são diferentes entre si.
+Error demuxing / Input/output error: Indica que o arquivo de vídeo está corrompido ou o disco falhou na leitura.
+Frame rate very high / Spewing statistics: Pode indicar que o servidor está sem CPU para processar aquele canal específico em tempo real.
+
 comando para configurar a inicialização automática definitiva.
 
 pm2 start /home/drmpremium/server.js --name iptv-pro
