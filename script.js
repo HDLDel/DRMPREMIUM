@@ -72,11 +72,56 @@ function formatUptime(seconds) {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+// Variáveis de estado para ordenação
+let currentSortColumn = 'id';
+let currentSortDirection = 'asc';
+
+function sortTable(column) {
+    if (currentSortColumn === column) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortColumn = column;
+        currentSortDirection = 'asc';
+    }
+    loadAndRenderChannels();
+}
+
+function updateSortIcons() {
+    const columns = ['id', 'name', 'status', 'uptime'];
+    columns.forEach(col => {
+        const icon = document.getElementById(`sort-icon-${col}`);
+        if (!icon) return;
+        if (col === currentSortColumn) {
+            icon.innerText = currentSortDirection === 'asc' ? ' ▲' : ' ▼';
+        } else {
+            icon.innerText = '';
+        }
+    });
+}
+
 // Function to load and render channels
 async function loadAndRenderChannels() {
     try {
         const res = await fetch('/api/channels');
-        const channels = await res.json();
+        let channels = await res.json();
+
+        // Lógica de ordenação
+        channels.sort((a, b) => {
+            let valA = a[currentSortColumn];
+            let valB = b[currentSortColumn];
+
+            if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+
+            if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        updateSortIcons();
+
         const tableBody = document.getElementById('channels-table');
         tableBody.innerHTML = ''; // Clear existing rows
 

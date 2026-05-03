@@ -83,6 +83,16 @@ button:hover { opacity: 0.8; }
 table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 th, td { text-align: left; padding: 12px; border-bottom: 1px solid #30363d; }
 
+th {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s;
+}
+
+th:hover {
+    color: var(--accent);
+}
+
 /* Estilo para o modal */
 #create-channel-modal {
     /* display: flex; */ /* Removido para ser controlado via JS */
