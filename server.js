@@ -39,7 +39,6 @@ const CHANNELS_DB_FILE = path.join(__dirname, 'channels.json');
 
 // Global array to hold channel configurations
 let channels = []; // { id: 1, name: 'Filmes de Acao', sourceFolder: 'Filmes_Acao', playlistFilePath: '...', status: 'offline' }
-let nextChannelId = 1; // Simple ID counter
 
 // Variáveis para cálculo de rede
 let prevBytesSent = 0;
@@ -64,9 +63,6 @@ async function loadChannels() {
             ...c,
             inputType: c.inputType || 'concat' // Fallback para canais antigos
         }));
-        if (channels.length > 0) {
-            nextChannelId = Math.max(...channels.map(c => c.id)) + 1;
-        }
         console.log(`Loaded ${channels.length} channels from ${CHANNELS_DB_FILE}`);
     }
 }
@@ -499,7 +495,12 @@ const server = http.createServer(async (req, res) => {
                 const scanPath = path.join(VIDEO_SOURCE, sourceFolderName);
                 const hlsCheckPath = path.join(scanPath, 'index.m3u8');
                 
-                const id = nextChannelId++;
+                // Busca o menor ID disponível (reutilizando IDs de canais excluídos)
+                let id = 1;
+                while (channels.some(c => c.id === id)) {
+                    id++;
+                }
+
                 const channelOutputDir = path.join(CHANNELS_DIR, id.toString());
                 if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
 
