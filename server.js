@@ -19,7 +19,6 @@ const LOGS_DIR = path.join(__dirname, 'logs'); // Pasta para logs do FFmpeg
 
 // Garante que as pastas necessárias existem
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
-if (!fs.existsSync(CHANNELS_DIR)) fs.mkdirSync(CHANNELS_DIR, { recursive: true });
 
 const NGINX_LOG = '/var/log/nginx/iptv_access.log';
 
@@ -136,7 +135,7 @@ function getDiskUsage() {
         // Suporte para Linux (Ubuntu) usando o comando df
         exec("df / --output=pcent | tail -1", (err, stdout) => {
             if (err) return resolve(0);
-            resolve(parseInt(stdout.trim()) || 0);
+            resolve(parseInt(stdout.replace('%', '').trim()) || 0);
         });
     });
 }
