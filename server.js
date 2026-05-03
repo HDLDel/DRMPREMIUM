@@ -11,6 +11,8 @@ const PORT = 8080;
 // Se for Linux, usa o /dev/shm (RAM Disk) para evitar I/O de disco
 const CHANNELS_DIR = process.platform === 'linux' 
     ? '/dev/shm/iptv_canais' 
+const CHANNELS_DIR = (process.platform === 'linux' || fs.existsSync('/dev/shm'))
+    ? '/dev/shm/iptv_canais'
     : path.join(__dirname, 'canais');
 
 const VIDEO_SOURCE = path.join(__dirname, '24HORAS'); // Pasta raiz dos vídeos
