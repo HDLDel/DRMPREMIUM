@@ -12,7 +12,6 @@ async function updateStats() {
         document.getElementById('disk-usage').innerText = `${data.disco}%`;
         document.getElementById('net-usage').innerText = `${data.rede} Mbps`;
         document.getElementById('active-streams').innerText = data.activeStreams;
-        loadAndRenderChannels(); // Also refresh channels to show status changes
     } catch (err) {
         console.error('Erro ao buscar telemetria:', err);
     }
