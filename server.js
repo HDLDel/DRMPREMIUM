@@ -226,14 +226,37 @@ async function getSystemStats() {
 /**
  * Inicia um canal (Substitui o start.php)
  */
-function startChannel(id) {
+async function startChannel(id) {
     const channel = channels.find(c => c.id === id);
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
-    const playlistPath = channel.playlistFilePath; // Use the stored playlist path for the channel
     const outputDir = path.join(CHANNELS_DIR, id.toString());
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+    let playlistPath = channel.playlistFilePath;
+
+    // Se for do tipo concat, re-geramos a playlist.txt na RAM para garantir que ela existe
+    if (channel.inputType === 'concat') {
+        const scanPath = path.join(VIDEO_SOURCE, channel.sourceFolder);
+        let mp4Files = await getFilesRecursive(scanPath, '.mp4');
+        
+        const validFiles = [];
+        for (const f of mp4Files) {
+            if (await isVideoValid(f)) validFiles.push(f);
+        }
+        mp4Files = validFiles;
+
+        playlistPath = path.join(outputDir, 'playlist.txt');
+        const playlistContent = mp4Files.map(f => {
+            const escaped = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
+            return `file '${escaped}'`;
+        }).join('\r\n');
+        
+        await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
+        // Atualiza o caminho em memória para o processo atual
+        channel.playlistFilePath = playlistPath;
+    }
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
     const args = [
@@ -252,7 +275,7 @@ function startChannel(id) {
         '-avoid_negative_ts', 'make_zero',
         '-c:v', 'copy',
         '-c:a', 'copy',
-        '-f', 'hls', '-hls_time', '4', '-hls_list_size', '6',
+        '-f', 'hls', '-hls_time', '15', '-hls_list_size', '6',
         '-hls_flags', 'delete_segments+append_list+omit_endlist',
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
         path.join(outputDir, 'index.m3u8')
@@ -418,9 +441,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/start' && req.method === 'POST') {
         let body = ''; // Removed canalNome from startChannel call
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             const data = JSON.parse(body);
-            const result = startChannel(Number(data.id)); 
+            const result = await startChannel(Number(data.id)); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
         });
@@ -636,7 +659,7 @@ setInterval(() => {
             const stats = fs.statSync(m3u8Path);
             const segundosDesdeMod = (Date.now() - stats.mtimeMs) / 1000;
             
-            if (segundosDesdeMod > 45) { // Aumentado para 45s para tolerar lentidão de I/O ou processamento
+            if (segundosDesdeMod > 90) { // Aumentado para 90s pois os segmentos agora têm 15s
                 console.log(`[WATCHDOG] Canal ${id} (${channel.name}) parece travado. Reiniciando...`);
                 
                 // Registra o travamento no log antes de matar o processo
@@ -647,7 +670,7 @@ setInterval(() => {
 
                 info.process.kill('SIGKILL');
                 activeStreams.delete(id);
-                setTimeout(() => startChannel(id), 2000);
+                setTimeout(async () => await startChannel(id), 2000);
             }
         }
     });
@@ -677,12 +700,12 @@ server.listen(PORT, async () => {
     await loadChannels(); // Load channels on startup
     
     // Auto-start: Verifica canais que deveriam estar online e inicia o FFmpeg
-    channels.forEach(channel => {
+    for (const channel of channels) {
         if (channel.status === 'online') {
             console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
-            startChannel(channel.id);
+            await startChannel(channel.id);
         }
-    });
+    }
 
     console.log(`\n=== IPTV PRO DASHBOARD ===`);
     console.log(`Servidor rodando em: http://localhost:${PORT}`);
