@@ -24,3 +24,9 @@ find /home/drmpremium/canais/ -maxdepth 1 -type l -delete
 
 ADMIN_USER=meuusuario ADMIN_PASS=minhasenha pm2 restart iptv-pro
 
+
+<BCRYPT_HASH_PLACEHOLDER>
+
+node -e "console.log(require('bcryptjs').hashSync('<REDACTED_PASSWORD>', 10))"
+
+

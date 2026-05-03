@@ -314,12 +314,19 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const { user, pass } = JSON.parse(body);
+            
+            const cleanUser = user ? user.trim().toLowerCase() : '';
+            console.log(`[AUTH] Tentativa de login para: ${cleanUser}`);
 
-            // Busca o administrador na lista e valida a senha
-            const adminFound = ADMINS.find(a => a.user === user);
+            const adminFound = ADMINS.find(a => a.user.toLowerCase() === cleanUser);
+            
             const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
 
+            if (!adminFound) console.log(`[AUTH] Falha: Usuário ${cleanUser} não encontrado.`);
+            if (adminFound && !isPasswordValid) console.log(`[AUTH] Falha: Senha incorreta para ${cleanUser}.`);
+
             if (adminFound && isPasswordValid) {
+                console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser}.`);
                 res.writeHead(200, { 
                     'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
                     'Content-Type': 'application/json' 
