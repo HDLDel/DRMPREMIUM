@@ -115,10 +115,15 @@ const activeStreams = new Map();
 /**
  * Helper para validar integridade do vídeo com ffprobe
  */
-async function isVideoValid(filePath) {
+function isVideoValid(filePath) {
     return new Promise((resolve) => {
-        exec(`ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${filePath}"`, (error) => {
-            resolve(!error);
+        const ff = spawn('ffprobe', [
+            '-v', 'error', '-select_streams', 'v:0',
+            '-show_entries', 'stream=codec_name',
+            '-of', 'default=noprint_wrappers=1:nokey=1', filePath
+        ]);
+        ff.on('close', (code) => {
+            resolve(code === 0);
         });
     });
 }
@@ -241,16 +246,29 @@ async function startChannel(id) {
     // Se for do tipo concat, re-geramos a playlist.txt na RAM para garantir que ela existe
     if (channel.inputType === 'concat') {
         const scanPath = path.join(VIDEO_SOURCE, channel.sourceFolder);
+        console.log(`[CANAL ${id}] Escaneando pasta de origem: ${scanPath}`);
+
         let mp4Files = await getFilesRecursive(scanPath, '.mp4');
         
         const validFiles = [];
         for (const f of mp4Files) {
-            if (await isVideoValid(f)) validFiles.push(f);
+            if (await isVideoValid(f)) {
+                validFiles.push(f);
+            } else {
+                console.warn(`[CANAL ${id}] Arquivo inválido ou ilegível: ${path.basename(f)}`);
+            }
         }
         mp4Files = validFiles;
 
+        if (mp4Files.length === 0) {
+            console.error(`[ERRO CANAL ${id}] Nenhum vídeo válido encontrado em ${scanPath}`);
+        } else {
+            console.log(`[CANAL ${id}] Playlist gerada com ${mp4Files.length} arquivos. Exemplo: ${mp4Files[0]}`);
+        }
+
         playlistPath = path.join(outputDir, 'playlist.txt');
         const playlistContent = mp4Files.map(f => {
+            // Garante barras de Linux e escapa aspas simples para o formato concat do ffmpeg
             const escaped = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
             return `file '${escaped}'`;
         }).join('\r\n');
@@ -267,7 +285,8 @@ async function startChannel(id) {
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
     const args = [
-        '-fflags', '+genpts',
+        '-fflags', '+genpts+igndts', // Gera e ignora timestamps problemáticos
+        '-err_detect', 'ignore_err',  // Ignora erros de dados para não parar o processo
         '-re',
         '-stream_loop', '-1'
     ];
@@ -279,6 +298,7 @@ async function startChannel(id) {
     args.push('-i', playlistPath);
 
     args.push(
+        '-flags', '+global_header',   // Melhora compatibilidade de troca de stream
         '-avoid_negative_ts', 'make_zero',
         '-c:v', 'copy',
         '-c:a', 'copy',
