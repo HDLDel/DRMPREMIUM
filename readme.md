@@ -11,6 +11,13 @@ Non-matching parameters in input streams: Confirmaria que os vídeos da pasta s�
 Error demuxing / Input/output error: Indica que o arquivo de vídeo está corrompido ou o disco falhou na leitura.
 Frame rate very high / Spewing statistics: Pode indicar que o servidor está sem CPU para processar aquele canal específico em tempo real.
 
+
+1. Sobre outros logs do sistema: Sim, você pode verificar se o sistema operacional está interrompendo o processo por falta de recursos (como memória) usando estes comandos no terminal:
+
+dmesg | tail -n 50: Verifica se o "OOM Killer" (matador de processos por falta de memória) agiu.
+journalctl -u nginx --since "1 hour ago": Verifica se o Nginx reportou erros de conexão.
+pm2 logs iptv-pro: Mostra se o próprio Node.js está sofrendo algum crash interno.
+
 comando para configurar a inicialização automática definitiva.
 
 pm2 start /home/drmpremium/server.js --name iptv-pro

@@ -315,18 +315,7 @@ async function startChannel(id) {
     });
 
     ffmpeg.stderr.on('data', (data) => {
-        const message = data.toString();
-        // Filtra para gravar apenas erros reais e não o progresso de bitrate/tempo
-        const lowerMsg = message.toLowerCase();
-        if (
-            lowerMsg.includes('error') || 
-            lowerMsg.includes('fatal') || 
-            lowerMsg.includes('invalid') || 
-            lowerMsg.includes('failed') ||
-            lowerMsg.includes('not found')
-        ) {
-            logStream.write(`[FFMPEG] ${message}`);
-        }
+        logStream.write(`[FFMPEG] ${data.toString()}`);
     });
 
     ffmpeg.stderr.on('error', (err) => {
