@@ -234,6 +234,12 @@ async function startChannel(id) {
     const outputDir = path.join(CHANNELS_DIR, id.toString());
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
+    // Limpa arquivos antigos para o Watchdog não se confundir com timestamps do passado
+    const m3u8Path = path.join(outputDir, 'index.m3u8');
+    if (fs.existsSync(m3u8Path)) {
+        try { fs.unlinkSync(m3u8Path); } catch(e) {}
+    }
+
     let playlistPath = channel.playlistFilePath;
 
     // Se for do tipo concat, re-geramos a playlist.txt na RAM para garantir que ela existe
@@ -256,6 +262,11 @@ async function startChannel(id) {
         await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
         // Atualiza o caminho em memória para o processo atual
         channel.playlistFilePath = playlistPath;
+    }
+
+    // Correção: Garante que o playlistPath aponte para a RAM se o canal for concat
+    if (channel.inputType === 'concat') {
+        playlistPath = path.join(outputDir, 'playlist.txt');
     }
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
