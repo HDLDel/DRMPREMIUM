@@ -15,11 +15,11 @@ const NGINX_LOG = process.platform === 'win32' ? path.join(__dirname, 'access.lo
 // Exemplo: 'C:\\ffmpeg\\bin\\ffmpeg.exe'
 const FFMPEG_PATH = 'ffmpeg'; 
 
-// Configurações de Acesso
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-// Hash para a senha padrão 'admin123' caso não seja fornecida uma via variável de ambiente
-const DEFAULT_HASH = '<BCRYPT_HASH_PLACEHOLDER>'; 
-const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || DEFAULT_HASH;
+// Lista de Administradores com hashes seguros (bcrypt)
+const ADMINS = [
+    { user: '<ADMIN_EMAIL_PLACEHOLDER>', hash: '<BCRYPT_HASH_PLACEHOLDER>' }, // <REDACTED_PASSWORD>
+    { user: '<ADMIN_USER_PLACEHOLDER>', hash: '<BCRYPT_HASH_PLACEHOLDER>' }  // <REDACTED_PASSWORD>
+];
 
 // Gera um ID de sessão aleatório e seguro a cada inicialização do servidor
 const SESSION_ID = crypto.randomBytes(32).toString('hex');
@@ -315,11 +315,11 @@ const server = http.createServer(async (req, res) => {
         req.on('end', () => {
             const { user, pass } = JSON.parse(body);
 
-            // Validação de segurança usando bcrypt e constantes definidas no início do arquivo
-            const isUserValid = (user === ADMIN_USER);
-            const isPasswordValid = bcrypt.compareSync(pass, ADMIN_PASS_HASH);
+            // Busca o administrador na lista e valida a senha
+            const adminFound = ADMINS.find(a => a.user === user);
+            const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
 
-            if (isUserValid && isPasswordValid) {
+            if (adminFound && isPasswordValid) {
                 res.writeHead(200, { 
                     'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
                     'Content-Type': 'application/json' 
