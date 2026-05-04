@@ -255,6 +255,7 @@ async function loadVideoSourceOptions() {
 async function createChannel() {
     const channelName = document.getElementById('new-channel-name').value;
     const sourceFolderName = document.getElementById('video-source-select').value;
+    const useTranscode = document.getElementById('use-transcode').checked;
 
     if (!channelName || !sourceFolderName) {
         alert('Por favor, preencha todos os campos e selecione uma pasta de origem.');
@@ -265,7 +266,7 @@ async function createChannel() {
         const res = await fetch('/api/createchannel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelName, sourceFolderName })
+            body: JSON.stringify({ channelName, sourceFolderName, useTranscode })
         });
         const result = await res.json();
         if (result.status === 'success') {

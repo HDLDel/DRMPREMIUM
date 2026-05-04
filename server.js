@@ -264,11 +264,26 @@ async function startChannel(id) {
 
     args.push('-i', playlistPath);
 
+    if (channel.useTranscode) {
+        // Modo Estável: Reconstrói o stream para evitar quebras em arquivos com FPS/Codecs diferentes
+        args.push(
+            '-c:v', 'libx264', 
+            '-preset', 'ultrafast', 
+            '-tune', 'zerolatency', 
+            '-r', '30', // Normaliza o framerate
+            '-g', '60', // Keyframe a cada 2 segundos para HLS estável
+            '-c:a', 'aac', 
+            '-b:a', '128k', 
+            '-ar', '44100'
+        );
+    } else {
+        // Modo Econômico: Apenas copia os streams originais
+        args.push('-c:v', 'copy', '-c:a', 'copy');
+    }
+
     args.push(
         '-flags', '+global_header',   // Melhora compatibilidade de troca de stream
         '-avoid_negative_ts', 'make_zero',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
         '-f', 'hls', '-hls_time', '15', '-hls_list_size', '6',
         '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
