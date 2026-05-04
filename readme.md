@@ -58,8 +58,16 @@ ps -fp $(pgrep -f "iptv_canais/5/") >> canal5.txt
 while true; do date >> canal5_full_monitor.txt; ps -fp $(pgrep -f "iptv_canais/5/") >> canal5_full_monitor.txt 2>&1; echo "--------------------------------" >> canal5_full_monitor.txt; sleep 5; done
 
 
+converte todos os arquivos da pasta 
 
+usando 100% da cpu
 mkdir -p convertidos && for f in *.mp4; do ffmpeg -i "$f" -c:v libx264 -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
+
+usando 50% da cpu
+mkdir -p convertidos && threads=$(($(nproc) / 2)); [ "$threads" -eq 0 ] && threads=1; for f in *.mp4; do ffmpeg -i "$f" -threads "$threads" -c:v libx264 -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
+
+usando 100 da gpu nvidia
+mkdir -p convertidos && for f in *.mp4; do ffmpeg -hwaccel cuda -i "$f" -c:v h264_nvenc -preset p7 -tune hq -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
 
 -profile:v high -level:v 4.0: Define o perfil High e Nível 4.0.
 
@@ -73,6 +81,7 @@ mkdir -p convertidos && for f in *.mp4; do ffmpeg -i "$f" -c:v libx264 -profile:
 
 -ar 44100: Define a taxa de amostragem em 44.1 kHz.
 
+usa metade da cpu
 
 
 
