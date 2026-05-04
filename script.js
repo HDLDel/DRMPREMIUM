@@ -2,6 +2,8 @@
  * Lógica do Frontend para o Dashboard IPTV
  */
 
+let allChannels = []; // Armazenar todos os canais para busca
+
 async function updateStats() {
     try {
         const res = await fetch('/api/status');
@@ -44,7 +46,7 @@ async function start(id) {
         //     alert(`Erro: ${result.message}`);
         // }
         updateStats();
-        loadAndRenderChannels();
+        loadAndRenderChannels(document.getElementById('search-input').value);
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
     }
@@ -58,7 +60,7 @@ async function stop(id) {
             body: JSON.stringify({ id })
         });
         updateStats(); // This will also call loadAndRenderChannels
-        loadAndRenderChannels();
+        loadAndRenderChannels(document.getElementById('search-input').value);
     } catch (err) {
         console.error('Erro ao parar canal:', err);
     }
@@ -83,7 +85,7 @@ function sortTable(column) {
         currentSortColumn = column;
         currentSortDirection = 'asc';
     }
-    loadAndRenderChannels();
+    loadAndRenderChannels(document.getElementById('search-input').value);
 }
 
 function updateSortIcons() {
@@ -100,10 +102,20 @@ function updateSortIcons() {
 }
 
 // Function to load and render channels
-async function loadAndRenderChannels() {
+async function loadAndRenderChannels(filter = '') {
     try {
         const res = await fetch('/api/channels');
         let channels = await res.json();
+
+        allChannels = channels; // Armazenar todos os canais
+
+        // Aplicar filtro de busca
+        if (filter) {
+            channels = channels.filter(channel =>
+                channel.name.toLowerCase().includes(filter.toLowerCase()) ||
+                channel.id.toString().includes(filter)
+            );
+        }
 
         // Lógica de ordenação
         channels.sort((a, b) => {
@@ -126,7 +138,8 @@ async function loadAndRenderChannels() {
         tableBody.innerHTML = ''; // Clear existing rows
 
         if (channels.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Nenhum canal configurado. Crie um novo!</td></tr>';
+            const message = filter ? 'Nenhum canal encontrado para a busca.' : 'Nenhum canal configurado. Crie um novo!';
+            tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${message}</td></tr>`;
             return;
         }
 
@@ -209,7 +222,7 @@ async function deleteChannel(id, status) {
         }
 
         updateStats(); // Isso forçará a atualização da lista de canais
-        loadAndRenderChannels();
+        loadAndRenderChannels(document.getElementById('search-input').value);
     } catch (err) {
         console.error('Erro ao excluir canal:', err);
         alert('Erro ao excluir o canal.');
@@ -272,7 +285,7 @@ async function createChannel() {
         if (result.status === 'success') {
             alert(`Canal "${result.channel.name}" criado com sucesso!`);
             hideCreateChannelModal();
-            loadAndRenderChannels(); // Refresh channel list
+            loadAndRenderChannels(document.getElementById('search-input').value); // Refresh channel list
         } else {
             alert(`Erro ao criar canal: ${result.message}`);
         }
@@ -282,8 +295,31 @@ async function createChannel() {
     }
 }
 
+// Função para busca
+function handleSearch() {
+    const filter = document.getElementById('search-input').value;
+    loadAndRenderChannels(filter);
+}
+
+// Função para scroll to top
+function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Event listeners
+document.getElementById('search-input').addEventListener('input', handleSearch);
+
+window.addEventListener('scroll', () => {
+    const scrollToTopBtn = document.getElementById('scroll-to-top');
+    if (window.scrollY > 100) {
+        scrollToTopBtn.style.display = 'block';
+    } else {
+        scrollToTopBtn.style.display = 'none';
+    }
+});
+
 // Atualização automática dos gráficos de hardware
 setInterval(updateStats, 5000);
-setInterval(loadAndRenderChannels, 10000);
+setInterval(() => loadAndRenderChannels(document.getElementById('search-input').value), 10000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load

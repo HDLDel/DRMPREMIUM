@@ -79,7 +79,7 @@ mkdir -p convertidos && for f in *.mp4; do ffmpeg -hwaccel cuda -i "$f" -c:v h26
 
 -ac 2: Reduz ou mapeia os canais para Stereo.
 
--ar 44100: Define a taxa de amostragem em 44.1 kHz.
+-ar 44100: Define a taxa de amostragem em 44.1 kHz.r
 
 usa metade da cpu
 

@@ -36,6 +36,10 @@
 
     <div class="channel-list">
         <h2>Canais Disponíveis</h2>
+        <div class="search-bar">
+            <input type="text" id="search-input" placeholder="Buscar canais...">
+            <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -51,8 +55,6 @@
             </tbody>
         </table>
     </div>
-
-    <button onclick="showCreateChannelModal()" style="margin-top: 20px;">Criar Novo Canal</button>
 
     <!-- Modal para Criar Canal -->
     <div id="create-channel-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:1000;">
@@ -90,6 +92,8 @@
             <pre id="log-content" style="flex:1; background:#000; color:#0f0; padding:15px; overflow-y:auto; font-family:monospace; font-size:0.85em; border:1px solid #30363d; margin:0;"></pre>
         </div>
     </div>
+
+    <button id="scroll-to-top" onclick="scrollToTop()">↑</button>
 
     <script src="script.js?v=1.0.2"></script>
 </body>
