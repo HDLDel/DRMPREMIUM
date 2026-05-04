@@ -256,7 +256,7 @@ async function startChannel(id) {
         '-re',
         '-stream_loop', '-1'
     ];
-    args.push('-vsync', '0'); // Evita que o FFmpeg tente compensar gaps de tempo com frames extras
+    args.push('-fps_mode', 'passthrough'); // Versão moderna do -vsync 0 para evitar warnings
 
     if (channel.inputType === 'concat') {
         args.push('-f', 'concat', '-safe', '0');
@@ -478,7 +478,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { channelName, sourceFolderName } = JSON.parse(body);
+                const { channelName, sourceFolderName, useTranscode } = JSON.parse(body);
                 const scanPath = path.join(VIDEO_SOURCE, sourceFolderName);
                 const hlsCheckPath = path.join(scanPath, 'index.m3u8');
                 
@@ -533,7 +533,8 @@ const server = http.createServer(async (req, res) => {
                     sourceFolder: sourceFolderName,
                     playlistFilePath,
                     inputType,
-                    status: 'offline'
+                    status: 'offline',
+                    useTranscode: !!useTranscode // Salva a preferência de transcodificação
                 };
 
                 channels.push(newChannel);
