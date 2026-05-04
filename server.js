@@ -262,11 +262,11 @@ async function startChannel(id) {
     }
 
     args.push('-i', playlistPath);
-    args.push('-fps_mode', 'passthrough'); // Versão moderna do -vsync 0 para evitar warnings
 
     if (channel.useTranscode) {
         // Modo Estável: Reconstrói o stream para evitar quebras em arquivos com FPS/Codecs diferentes
         args.push(
+            '-fps_mode', 'cfr', // Força Constant Frame Rate para o transcode (necessário para -r 30)
             '-c:v', 'libx264', 
             '-preset', 'ultrafast', 
             '-tune', 'zerolatency', 
@@ -278,6 +278,7 @@ async function startChannel(id) {
         );
     } else {
         // Modo Econômico: Apenas copia os streams originais
+        args.push('-fps_mode', 'passthrough'); // Mantém timestamps originais no modo copy
         args.push('-c:v', 'copy', '-c:a', 'copy');
     }
 
