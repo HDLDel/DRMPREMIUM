@@ -83,7 +83,12 @@ mkdir -p convertidos && for f in *.mp4; do ffmpeg -hwaccel cuda -i "$f" -c:v h26
 
 usa metade da cpu
 
+cp -rf "/convertidos/"* "/home/drmpremium/24HORAS/Black Kamen Rider Black RX/"
 
 
+cp -rf convertidos/* .
+
+
+for f in *.mp4; do echo "Verificando: $f"; ffmpeg -v error -i "$f" -f null -; done
 
 
