@@ -270,11 +270,12 @@ async function startChannel(id) {
             '-c:v', 'libx264', 
             '-preset', 'ultrafast', 
             '-tune', 'zerolatency', 
-            '-r', '30', // Normaliza o framerate
-            '-g', '60', // Keyframe a cada 2 segundos para HLS estável
-            '-c:a', 'aac', 
-            '-b:a', '128k', 
-            '-ar', '44100'
+            '-r', '24',          // Reduz para 24fps (mais leve que 30)
+            '-g', '48',          // Keyframe a cada 2 segundos (2 * 24fps)
+            '-crf', '28',        // Reduz a carga de processamento de imagem
+            '-threads', '1',     // Garante que o canal não consuma toda a CPU do servidor
+            '-c:a', 'copy',      // Copia o áudio original (economiza processamento)
+            '-sn', '-dn'         // Remove legendas e dados (economiza processamento)
         );
     } else {
         // Modo Econômico: Apenas copia os streams originais

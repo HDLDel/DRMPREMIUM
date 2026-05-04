@@ -59,6 +59,21 @@ while true; do date >> canal5_full_monitor.txt; ps -fp $(pgrep -f "iptv_canais/5
 
 
 
+mkdir -p convertidos && for f in *.mp4; do ffmpeg -i "$f" -c:v libx264 -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
+
+-profile:v high -level:v 4.0: Define o perfil High e Nível 4.0.
+
+-r 24: Estabelece o framerate fixo de 24 FPS (CFR).
+
+-vf "scale=1280:720": Altera a resolução para as dimensões fixas de 1280x720.
+
+-c:a aac: Força a re-encodagem de áudio para AAC.
+
+-ac 2: Reduz ou mapeia os canais para Stereo.
+
+-ar 44100: Define a taxa de amostragem em 44.1 kHz.
+
+
 
 
 
