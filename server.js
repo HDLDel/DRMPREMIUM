@@ -256,13 +256,13 @@ async function startChannel(id) {
         '-re',
         '-stream_loop', '-1'
     ];
-    args.push('-fps_mode', 'passthrough'); // Versão moderna do -vsync 0 para evitar warnings
 
     if (channel.inputType === 'concat') {
         args.push('-f', 'concat', '-safe', '0');
     }
 
     args.push('-i', playlistPath);
+    args.push('-fps_mode', 'passthrough'); // Versão moderna do -vsync 0 para evitar warnings
 
     if (channel.useTranscode) {
         // Modo Estável: Reconstrói o stream para evitar quebras em arquivos com FPS/Codecs diferentes
