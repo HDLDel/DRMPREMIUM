@@ -42,6 +42,36 @@ let channels = []; // { id: 1, name: 'Filmes de Acao', sourceFolder: 'Filmes_Aca
 let prevBytesSent = 0;
 let lastNetTime = Date.now();
 
+// Variáveis e funções para cálculo de CPU real (estilo htop)
+function getCpuTimes() {
+    const cpus = os.cpus();
+    if (!cpus || cpus.length === 0) return { idle: 0, total: 0 };
+    let user = 0, nice = 0, sys = 0, idle = 0, irq = 0;
+    for (let i = 0; i < cpus.length; i++) {
+        user += cpus[i].times.user;
+        nice += cpus[i].times.nice;
+        sys += cpus[i].times.sys;
+        idle += cpus[i].times.idle;
+        irq += cpus[i].times.irq;
+    }
+    const total = user + nice + sys + idle + irq;
+    return { idle, total };
+}
+let lastCpuTimes = getCpuTimes();
+
+function getRealCpuUsage() {
+    const current = getCpuTimes();
+    const idleDiff = current.idle - lastCpuTimes.idle;
+    const totalDiff = current.total - lastCpuTimes.total;
+    
+    lastCpuTimes = current;
+
+    if (totalDiff === 0) return 0;
+    const usage = 100 - Math.round((idleDiff / totalDiff) * 100);
+    return Math.max(0, Math.min(100, usage));
+}
+
+
 function getCookies(req) {
     const list = {};
     const rc = req.headers.cookie;
@@ -176,12 +206,14 @@ async function getSystemStats() {
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
 
-    const cpu = Math.round((load[0] / os.cpus().length) * 100);
+    const io = Math.round((load[0] / os.cpus().length) * 100);
+    const cpuReal = getRealCpuUsage();
     const disco = await getDiskUsage();
     const rede = await getNetworkUsage();
     
     return {
-        cpu: cpu,
+        cpu: cpuReal,
+        io: io,
         ram: Math.round(((totalMem - freeMem) / totalMem) * 100),
         disco: disco,
         rede: rede,

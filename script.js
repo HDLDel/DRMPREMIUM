@@ -9,6 +9,7 @@ async function updateStats() {
         const res = await fetch('/api/status');
         const data = await res.json();
         
+        document.getElementById('io-usage').innerText = `${data.io}%`;
         document.getElementById('cpu-usage').innerText = `${data.cpu}%`;
         document.getElementById('ram-usage').innerText = `${data.ram}%`;
         document.getElementById('disk-usage').innerText = `${data.disco}%`;
