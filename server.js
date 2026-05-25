@@ -436,6 +436,47 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ status: 'logged_out' }));
     }
 
+    // Rota Pública da Playlist M3U para Players de IPTV
+    if (url.pathname === '/playlist.m3u') {
+        const host = req.headers.host || 'localhost';
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        let m3uContent = '#EXTM3U\n';
+        
+        for (const channel of channels) {
+            const group = channel.is18 ? 'Adultos' : 'Canais';
+            m3uContent += `#EXTINF:-1 tvg-id="${channel.id}" tvg-name="${channel.name}" group-title="${group}" tvg-logo="",${channel.name}\n`;
+            m3uContent += `${protocol}://${host}/canais/${channel.id}/index.m3u8\n`;
+        }
+        
+        res.writeHead(200, {
+            'Content-Type': 'application/x-mpegurl',
+            'Content-Disposition': 'attachment; filename="playlist.m3u"',
+            'Access-Control-Allow-Origin': '*'
+        });
+        return res.end(m3uContent);
+    }
+
+    // API: Alternar status +18 de um canal
+    if (url.pathname === '/api/toggle18' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const data = JSON.parse(body);
+            const id = Number(data.id);
+            const channel = channels.find(c => c.id === id);
+            if (channel) {
+                channel.is18 = !channel.is18;
+                await saveChannels();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'success', is18: channel.is18 }));
+            } else {
+                res.writeHead(404);
+                res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
+            }
+        });
+        return;
+    }
+
     // Redireciona para login se não estiver autenticado
     if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
         res.writeHead(302, { 'Location': '/login.html' });
@@ -512,7 +553,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { channelName, sourceFolderName, useTranscode } = JSON.parse(body);
+                const { channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
                 const scanPath = path.join(VIDEO_SOURCE, sourceFolderName);
                 const hlsCheckPath = path.join(scanPath, 'index.m3u8');
                 
@@ -568,7 +609,8 @@ const server = http.createServer(async (req, res) => {
                     playlistFilePath,
                     inputType,
                     status: 'offline',
-                    useTranscode: !!useTranscode // Salva a preferência de transcodificação
+                    useTranscode: !!useTranscode,
+                    is18: !!is18
                 };
 
                 channels.push(newChannel);

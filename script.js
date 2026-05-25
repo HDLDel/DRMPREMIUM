@@ -147,7 +147,15 @@ async function loadAndRenderChannels(filter = '') {
         channels.forEach(channel => {
             const row = tableBody.insertRow();
             row.insertCell().innerText = channel.id;
-            row.insertCell().innerText = channel.name;
+            
+            const nameCell = row.insertCell();
+            let nameHTML = channel.name;
+            if (channel.is18) {
+                nameHTML += ` <span style="background:#ff4444; color:white; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:bold; cursor:pointer;" onclick="toggle18(${channel.id})" title="Clique para desmarcar +18">18+ 🔞</span>`;
+            } else {
+                nameHTML += ` <span style="border:1px solid #6e7681; color:#8b949e; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; cursor:pointer;" onclick="toggle18(${channel.id})" title="Clique para marcar como +18">+18?</span>`;
+            }
+            nameCell.innerHTML = nameHTML;
             
             const statusCell = row.insertCell();
             statusCell.innerHTML = `<span style="color: ${channel.status === 'online' ? '#00ff99' : '#ff4444'}">${channel.status.toUpperCase()}</span>`;
@@ -239,6 +247,7 @@ function showCreateChannelModal() {
 function hideCreateChannelModal() {
     document.getElementById('create-channel-modal').style.display = 'none';
     document.getElementById('new-channel-name').value = ''; // Clear input
+    document.getElementById('new-channel-is18').checked = false; // Reset checkbox
 }
 
 async function loadVideoSourceOptions() {
@@ -270,6 +279,7 @@ async function createChannel() {
     const channelName = document.getElementById('new-channel-name').value;
     const sourceFolderName = document.getElementById('video-source-select').value;
     const useTranscode = document.getElementById('use-transcode').checked;
+    const is18 = document.getElementById('new-channel-is18').checked;
 
     if (!channelName || !sourceFolderName) {
         alert('Por favor, preencha todos os campos e selecione uma pasta de origem.');
@@ -280,7 +290,7 @@ async function createChannel() {
         const res = await fetch('/api/createchannel', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelName, sourceFolderName, useTranscode })
+            body: JSON.stringify({ channelName, sourceFolderName, useTranscode, is18 })
         });
         const result = await res.json();
         if (result.status === 'success') {
@@ -324,3 +334,33 @@ setInterval(updateStats, 5000);
 setInterval(() => loadAndRenderChannels(document.getElementById('search-input').value), 10000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load
+
+// Alternar status +18 de forma dinâmica por clique
+async function toggle18(id) {
+    try {
+        const res = await fetch('/api/toggle18', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        if (res.ok) {
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        }
+    } catch (err) {
+        console.error('Erro ao alternar status +18:', err);
+    }
+}
+
+// Funções para exportar M3U
+function downloadM3U() {
+    window.location.href = '/playlist.m3u';
+}
+
+function copyM3ULink() {
+    const link = `${window.location.protocol}//${window.location.host}/playlist.m3u`;
+    navigator.clipboard.writeText(link).then(() => {
+        alert('Link da Playlist M3U copiado para a área de transferência:\n' + link);
+    }).catch(err => {
+        alert('Erro ao copiar link automaticamente. Aqui está o link:\n' + link);
+    });
+}

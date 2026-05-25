@@ -42,7 +42,11 @@
         <h2>Canais Disponíveis</h2>
         <div class="search-bar">
             <input type="text" id="search-input" placeholder="Buscar canais...">
-            <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
+            <div>
+                <button onclick="downloadM3U()" style="background:#2563eb; color:white; margin-right:10px;">💾 Exportar M3U (Baixar)</button>
+                <button onclick="copyM3ULink()" style="background:#6e7681; color:white; margin-right:10px;">🔗 Copiar Link M3U</button>
+                <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
+            </div>
         </div>
         <table>
             <thead>
@@ -79,6 +83,11 @@
             <div style="margin-bottom: 20px;">
                 <input type="checkbox" id="use-transcode">
                 <label for="use-transcode" style="color:var(--text); font-size:0.9em;">Ativar Transcodificação (Maior Estabilidade)</label>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <input type="checkbox" id="new-channel-is18">
+                <label for="new-channel-is18" style="color:var(--text); font-size:0.9em; font-weight: bold;">🔞 Conteúdo +18 (Adulto)</label>
             </div>
 
             <button onclick="createChannel()">Criar Canal</button>
