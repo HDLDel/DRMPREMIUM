@@ -118,6 +118,15 @@ async function loadAndRenderChannels(filter = '') {
             );
         }
 
+        // Aplicar filtro por tipo de conteúdo (+18 / Livre)
+        const filterSelect = document.getElementById('filter-select');
+        const filterType = filterSelect ? filterSelect.value : 'all';
+        if (filterType === '18') {
+            channels = channels.filter(channel => channel.is18);
+        } else if (filterType === 'family') {
+            channels = channels.filter(channel => !channel.is18);
+        }
+
         // Lógica de ordenação
         channels.sort((a, b) => {
             let valA = a[currentSortColumn];
