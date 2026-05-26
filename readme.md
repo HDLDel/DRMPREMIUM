@@ -20,7 +20,7 @@ pm2 logs iptv-pro: Mostra se o próprio Node.js está sofrendo algum crash inter
 
 comando para configurar a inicialização automática definitiva.
 
-pm2 start /home/drmpremium/server.js --name iptv-pro
+pm2 start /home/drmpremium/server.js --name 24horas
 
 pm2 startup
 
@@ -30,12 +30,12 @@ pm2 save
 ls -ld /home/drmpremium/canais/*
 
 
-pm2 restart iptv-pro
+pm2 restart 24horas
 
 find /home/drmpremium/canais/ -maxdepth 1 -type l -delete
 
 
-ADMIN_USER=meuusuario ADMIN_PASS=minhasenha pm2 restart iptv-pro
+ADMIN_USER=meuusuario ADMIN_PASS=minhasenha pm2 restart 24horas
 
 
 <BCRYPT_HASH_PLACEHOLDER>
