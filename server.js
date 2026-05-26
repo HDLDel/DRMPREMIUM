@@ -443,8 +443,8 @@ const server = http.createServer(async (req, res) => {
         let m3uContent = '#EXTM3U\n';
         
         for (const channel of channels) {
-            const group = channel.is18 ? 'Adultos' : 'Canais';
-            m3uContent += `#EXTINF:-1 tvg-id="${channel.id}" tvg-name="${channel.name}" group-title="${group}" tvg-logo="",${channel.name}\n`;
+            const cleanName = channel.name.trim();
+            m3uContent += `#EXTINF:-1 tvg-name="${cleanName}" tvg-logo="" group-title="",${cleanName}\n`;
             m3uContent += `${protocol}://${host}/canais/${channel.id}/index.m3u8\n`;
         }
         
@@ -684,6 +684,41 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ status: 'stopped' }));
         });
         return;
+    }
+
+    if (url.pathname === '/api/startall' && req.method === 'POST') {
+        const started = [];
+        for (const channel of channels) {
+            if (channel.status === 'offline' && !activeStreams.has(channel.id)) {
+                const result = await startChannel(channel.id);
+                if (result.status === 'success') {
+                    started.push(channel.name);
+                }
+            }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ status: 'success', started }));
+    }
+
+    if (url.pathname === '/api/stopall' && req.method === 'POST') {
+        const stopped = [];
+        for (const channel of channels) {
+            if (channel.status === 'online' || activeStreams.has(channel.id)) {
+                channel.status = 'offline';
+                if (activeStreams.has(channel.id)) {
+                    try {
+                        activeStreams.get(channel.id).process.kill('SIGKILL');
+                    } catch (e) {
+                        console.error(`Erro ao parar canal ${channel.id}:`, e);
+                    }
+                    activeStreams.delete(channel.id);
+                }
+                stopped.push(channel.name);
+            }
+        }
+        await saveChannels();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ status: 'success', stopped }));
     }
 
     // Servir Arquivos Estáticos (Dashboard)

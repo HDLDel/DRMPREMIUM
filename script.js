@@ -364,3 +364,37 @@ function copyM3ULink() {
         alert('Erro ao copiar link automaticamente. Aqui está o link:\n' + link);
     });
 }
+
+async function startAll() {
+    if (!confirm('Tem certeza que deseja INICIAR todos os canais offline?')) return;
+    try {
+        const res = await fetch('/api/startall', {
+            method: 'POST'
+        });
+        if (res.ok) {
+            updateStats();
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        } else {
+            alert('Erro ao iniciar todos os canais.');
+        }
+    } catch (err) {
+        alert('Falha ao conectar com o servidor.');
+    }
+}
+
+async function stopAll() {
+    if (!confirm('Tem certeza que deseja PARAR todos os canais ativos?')) return;
+    try {
+        const res = await fetch('/api/stopall', {
+            method: 'POST'
+        });
+        if (res.ok) {
+            updateStats();
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        } else {
+            alert('Erro ao parar todos os canais.');
+        }
+    } catch (err) {
+        alert('Falha ao conectar com o servidor.');
+    }
+}
