@@ -15,6 +15,41 @@ async function updateStats() {
         document.getElementById('disk-usage').innerText = `${data.disco}%`;
         document.getElementById('net-usage').innerText = `${data.rede} Mbps`;
         document.getElementById('active-streams').innerText = data.activeStreams;
+
+        // Renderizar discos/SSDs
+        if (data.disks && data.disks.length > 0) {
+            const container = document.getElementById('disks-container');
+            if (container) {
+                container.innerHTML = '';
+                data.disks.forEach(disk => {
+                    const pctVal = parseInt(disk.usePercent) || 0;
+                    
+                    // Cor da barra de progresso baseado no uso
+                    let barColor = 'var(--accent)'; // Verde
+                    if (pctVal > 90) {
+                        barColor = '#ff4444'; // Vermelho
+                    } else if (pctVal > 75) {
+                        barColor = '#f59e0b'; // Laranja
+                    }
+                    
+                    container.innerHTML += `
+                        <div class="disk-card" style="background: #0a0e14; border: 1px solid #30363d; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-weight: bold; color: var(--text); font-size: 1.05rem;">Montagem: ${disk.mounted}</span>
+                                <span style="color: #8b949e; font-size: 0.85rem; font-family: monospace;">${disk.filesystem}</span>
+                            </div>
+                            <div style="background: #1f242c; height: 10px; border-radius: 5px; overflow: hidden; width: 100%;">
+                                <div style="background: ${barColor}; width: ${pctVal}%; height: 100%; border-radius: 5px; transition: width 0.5s ease;"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                                <span>Disponível: <strong style="color: #00ff99;">${disk.avail}</strong></span>
+                                <span style="color: #8b949e;">${pctVal}% usado de ${disk.size}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+        }
     } catch (err) {
         console.error('Erro ao buscar telemetria:', err);
     }
