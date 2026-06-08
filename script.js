@@ -211,6 +211,7 @@ async function loadAndRenderChannels(filter = '') {
             if (channel.status === 'offline') {
                 actionsCell.innerHTML = `
                     <button onclick="start(${channel.id})" title="Iniciar">▶ Iniciar</button>
+                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
                     <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
                     <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
@@ -218,6 +219,7 @@ async function loadAndRenderChannels(filter = '') {
                 actionsCell.innerHTML = `
                     <button class="stop" onclick="stop(${channel.id})" title="Parar">⏹ Parar</button>
                     <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
+                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
                     <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
                     <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
@@ -283,9 +285,39 @@ async function deleteChannel(id, status) {
 }
 
 // Functions for modal
+// Functions for modal
+let editingChannelId = null;
+
 function showCreateChannelModal() {
+    editingChannelId = null;
+    document.getElementById('modal-title').innerText = 'Criar Novo Canal';
+    document.getElementById('modal-submit-btn').innerText = 'Criar Canal';
     document.getElementById('create-channel-modal').style.display = 'flex';
     loadVideoSourceOptions();
+}
+
+function showEditChannelModal(id) {
+    const channel = allChannels.find(c => c.id === id);
+    if (!channel) return;
+    
+    if (channel.status === 'online') {
+        alert('Por favor, PARE o canal antes de tentar editá-lo.');
+        return;
+    }
+
+    editingChannelId = id;
+    document.getElementById('modal-title').innerText = `Editar Canal: ${channel.name}`;
+    document.getElementById('modal-submit-btn').innerText = 'Salvar Alterações';
+    
+    document.getElementById('new-channel-name').value = channel.name;
+    document.getElementById('use-transcode').checked = !!channel.useTranscode;
+    document.getElementById('new-channel-is18').checked = !!channel.is18;
+    
+    // Exibe o modal
+    document.getElementById('create-channel-modal').style.display = 'flex';
+    
+    // Carrega as opções e pré-seleciona a pasta existente
+    loadVideoSourceOptions(channel.sourceFolder);
 }
 
 let isManualSource = false;
@@ -313,6 +345,8 @@ function hideCreateChannelModal() {
     document.getElementById('create-channel-modal').style.display = 'none';
     document.getElementById('new-channel-name').value = ''; // Clear input
     document.getElementById('new-channel-is18').checked = false; // Reset checkbox
+    document.getElementById('use-transcode').checked = false; // Reset checkbox
+    editingChannelId = null;
     
     // Reset manual input states
     isManualSource = false;
@@ -322,8 +356,10 @@ function hideCreateChannelModal() {
     document.getElementById('toggle-source-type').innerText = 'Usar caminho absoluto manual';
 }
 
-async function loadVideoSourceOptions() {
+async function loadVideoSourceOptions(selectedValue = "") {
     const select = document.getElementById('video-source-select');
+    const input = document.getElementById('video-source-input');
+    const toggleLink = document.getElementById('toggle-source-type');
     try {
         const res = await fetch('/api/videosources');
         if (!res.ok) throw new Error('Falha na resposta do servidor');
@@ -341,13 +377,31 @@ async function loadVideoSourceOptions() {
             option.innerText = folder === "." ? "Pasta Principal (Raiz)" : folder;
             select.appendChild(option);
         });
+
+        // Configuração de preenchimento em caso de edição
+        if (selectedValue) {
+            const isAbsolute = selectedValue.startsWith('/') || /^[a-zA-Z]:\\/.test(selectedValue);
+            if (isAbsolute) {
+                isManualSource = true;
+                select.style.display = 'none';
+                input.style.display = 'block';
+                input.value = selectedValue;
+                toggleLink.innerText = 'Selecionar da pasta 24HORAS';
+            } else {
+                isManualSource = false;
+                select.style.display = 'block';
+                input.style.display = 'none';
+                select.value = selectedValue;
+                toggleLink.innerText = 'Usar caminho absoluto manual';
+            }
+        }
     } catch (err) {
         console.error('Erro ao carregar pastas de vídeo:', err);
         select.innerHTML = '<option value="">Erro ao carregar</option>';
     }
 }
 
-async function createChannel() {
+async function createOrEditChannel() {
     const channelName = document.getElementById('new-channel-name').value;
     const selectVal = document.getElementById('video-source-select').value;
     const inputVal = document.getElementById('video-source-input').value;
@@ -360,23 +414,31 @@ async function createChannel() {
         return;
     }
 
+    const payload = { channelName, sourceFolderName, useTranscode, is18 };
+    let endpoint = '/api/createchannel';
+
+    if (editingChannelId !== null) {
+        payload.id = editingChannelId;
+        endpoint = '/api/updatechannel';
+    }
+
     try {
-        const res = await fetch('/api/createchannel', {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channelName, sourceFolderName, useTranscode, is18 })
+            body: JSON.stringify(payload)
         });
         const result = await res.json();
         if (result.status === 'success') {
-            alert(`Canal "${result.channel.name}" criado com sucesso!`);
+            alert(editingChannelId !== null ? `Canal atualizado com sucesso!` : `Canal "${result.channel.name}" criado com sucesso!`);
             hideCreateChannelModal();
             loadAndRenderChannels(document.getElementById('search-input').value); // Refresh channel list
         } else {
-            alert(`Erro ao criar canal: ${result.message}`);
+            alert(`Erro: ${result.message}`);
         }
     } catch (err) {
-        alert('Falha ao conectar com o servidor para criar canal.');
-        console.error('Erro ao criar canal:', err);
+        alert('Falha ao conectar com o servidor.');
+        console.error('Erro ao salvar canal:', err);
     }
 }
 

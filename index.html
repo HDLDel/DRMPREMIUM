@@ -35,6 +35,7 @@
         <div class="card">
             <h3>Streams Ativos</h3>
             <div class="value" id="active-streams">0</div>
+        </div>
     </div>
 
     <!-- Nova seção de Armazenamento SSD -->
@@ -85,7 +86,7 @@
     <!-- Modal para Criar Canal -->
     <div id="create-channel-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:1000;">
         <div style="background:var(--card); padding:30px; border-radius:12px; width:400px; max-width: 90%;">
-            <h2>Criar Novo Canal</h2>
+            <h2 id="modal-title">Criar Novo Canal</h2>
             <label for="new-channel-name" style="display:block; margin-bottom:5px; color:var(--text);">Nome do Canal:</label>
             <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h" style="width:calc(100% - 18px); padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
 
@@ -114,7 +115,7 @@
                 <label for="new-channel-is18" style="color:var(--text); font-size:0.9em; font-weight: bold;">🔞 Conteúdo +18 (Adulto)</label>
             </div>
 
-            <button onclick="createChannel()">Criar Canal</button>
+            <button id="modal-submit-btn" onclick="createOrEditChannel()">Criar Canal</button>
             <button onclick="hideCreateChannelModal()" style="background:#555; margin-left:10px;">Cancelar</button>
         </div>
     </div>
