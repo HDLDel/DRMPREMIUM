@@ -253,10 +253,38 @@ function showCreateChannelModal() {
     loadVideoSourceOptions();
 }
 
+let isManualSource = false;
+
+function toggleSourceInput(event) {
+    if (event) event.preventDefault();
+    const select = document.getElementById('video-source-select');
+    const input = document.getElementById('video-source-input');
+    const toggleLink = document.getElementById('toggle-source-type');
+    
+    isManualSource = !isManualSource;
+    if (isManualSource) {
+        select.style.display = 'none';
+        input.style.display = 'block';
+        toggleLink.innerText = 'Selecionar da pasta 24HORAS';
+        input.focus();
+    } else {
+        select.style.display = 'block';
+        input.style.display = 'none';
+        toggleLink.innerText = 'Usar caminho absoluto manual';
+    }
+}
+
 function hideCreateChannelModal() {
     document.getElementById('create-channel-modal').style.display = 'none';
     document.getElementById('new-channel-name').value = ''; // Clear input
     document.getElementById('new-channel-is18').checked = false; // Reset checkbox
+    
+    // Reset manual input states
+    isManualSource = false;
+    document.getElementById('video-source-select').style.display = 'block';
+    document.getElementById('video-source-input').style.display = 'none';
+    document.getElementById('video-source-input').value = '';
+    document.getElementById('toggle-source-type').innerText = 'Usar caminho absoluto manual';
 }
 
 async function loadVideoSourceOptions() {
@@ -286,12 +314,14 @@ async function loadVideoSourceOptions() {
 
 async function createChannel() {
     const channelName = document.getElementById('new-channel-name').value;
-    const sourceFolderName = document.getElementById('video-source-select').value;
+    const selectVal = document.getElementById('video-source-select').value;
+    const inputVal = document.getElementById('video-source-input').value;
+    const sourceFolderName = isManualSource ? inputVal.trim() : selectVal;
     const useTranscode = document.getElementById('use-transcode').checked;
     const is18 = document.getElementById('new-channel-is18').checked;
 
     if (!channelName || !sourceFolderName) {
-        alert('Por favor, preencha todos os campos e selecione uma pasta de origem.');
+        alert('Por favor, preencha todos os campos e selecione ou digite uma pasta de origem.');
         return;
     }
 

@@ -81,12 +81,18 @@
             <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h" style="width:calc(100% - 18px); padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
 
             <label for="video-source-select" style="display:block; margin-bottom:5px; color:var(--text);">Pasta de Vídeos Fonte:</label>
-            <select id="video-source-select" style="width:100%; padding:8px; margin-bottom:20px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                <option value="">Carregando...</option>
-                <!-- Options will be loaded here by JavaScript -->
-            </select>
+            <div id="video-source-container" style="margin-bottom: 20px;">
+                <select id="video-source-select" style="width:100%; padding:8px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                    <option value="">Carregando...</option>
+                    <!-- Options will be loaded here by JavaScript -->
+                </select>
+                <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none; width:calc(100% - 18px); padding:8px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                <div style="margin-top: 5px; text-align: right;">
+                    <a href="#" id="toggle-source-type" style="color: #58a6ff; font-size: 0.85em; text-decoration: none;" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+                </div>
+            </div>
             <p style="font-size:0.8em; color:#8b949e; margin-top:-10px; margin-bottom:20px;">
-                A pasta selecionada deve conter um arquivo `playlist.txt` com a lista de vídeos.
+                A pasta selecionada deve conter arquivos de vídeo compatíveis ou index.m3u8 para HLS.
             </p>
 
             <div style="margin-bottom: 20px;">

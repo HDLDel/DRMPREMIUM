@@ -101,14 +101,31 @@ async function saveChannels() {
 }
 
 // Helper para listar subdiretórios recursivamente para a seleção no Dashboard
+// Helper para listar subdiretórios recursivamente para a seleção no Dashboard
 async function getDirectoriesRecursive(base, root = base) {
     let results = ["."]; // Inclui a própria raiz
+    const visited = new Set();
+    try {
+        visited.add(fs.realpathSync(base));
+    } catch (e) {}
+
     async function walk(dir) {
         try {
             const list = await fs.promises.readdir(dir, { withFileTypes: true });
             for (const dirent of list) {
-                if (dirent.isDirectory()) {
-                    const res = path.join(dir, dirent.name);
+                const res = path.join(dir, dirent.name);
+                let isDir = false;
+                let canonical = "";
+                try {
+                    const stat = fs.statSync(res);
+                    isDir = stat.isDirectory();
+                    if (isDir) {
+                        canonical = fs.realpathSync(res);
+                    }
+                } catch (e) {}
+
+                if (isDir && canonical && !visited.has(canonical)) {
+                    visited.add(canonical);
                     results.push(path.relative(root, res));
                     await walk(res);
                 }
@@ -122,18 +139,41 @@ async function getDirectoriesRecursive(base, root = base) {
 // Helper para buscar todos os arquivos MP4 recursivamente em uma pasta
 async function getFilesRecursive(dir, extension) {
     let results = [];
+    const visited = new Set();
     try {
-        const list = await fs.promises.readdir(dir, { withFileTypes: true });
-        for (const dirent of list) {
-            const res = path.join(dir, dirent.name);
-            if (dirent.isDirectory()) {
-                results = results.concat(await getFilesRecursive(res, extension));
-            } else if (path.extname(dirent.name).toLowerCase() === extension && fs.statSync(res).size > 0) {
-                // Filtra arquivos vazios (0 bytes) que causam erro de 'moov atom'
-                results.push(res);
-            }
-        }
+        visited.add(fs.realpathSync(dir));
     } catch (e) {}
+
+    async function walk(currentDir) {
+        try {
+            const list = await fs.promises.readdir(currentDir, { withFileTypes: true });
+            for (const dirent of list) {
+                const res = path.join(currentDir, dirent.name);
+                let isDir = false;
+                let canonical = "";
+                let size = 0;
+                try {
+                    const stat = fs.statSync(res);
+                    isDir = stat.isDirectory();
+                    size = stat.size;
+                    if (isDir) {
+                        canonical = fs.realpathSync(res);
+                    }
+                } catch (e) {}
+
+                if (isDir) {
+                    if (canonical && !visited.has(canonical)) {
+                        visited.add(canonical);
+                        await walk(res);
+                    }
+                } else if (path.extname(dirent.name).toLowerCase() === extension && size > 0) {
+                    // Filtra arquivos vazios (0 bytes) que causam erro de 'moov atom'
+                    results.push(res);
+                }
+            }
+        } catch (e) {}
+    }
+    if (fs.existsSync(dir)) await walk(dir);
     return results;
 }
 
@@ -243,7 +283,9 @@ async function startChannel(id) {
 
     // Se for do tipo concat, re-geramos a playlist.txt na RAM para garantir que ela existe
     if (channel.inputType === 'concat') {
-        const scanPath = path.join(VIDEO_SOURCE, channel.sourceFolder);
+        const scanPath = path.isAbsolute(channel.sourceFolder)
+            ? channel.sourceFolder
+            : path.join(VIDEO_SOURCE, channel.sourceFolder);
         console.log(`[CANAL ${id}] Escaneando pasta de origem: ${scanPath}`);
 
         let mp4Files = await getFilesRecursive(scanPath, '.mp4');
@@ -554,7 +596,15 @@ const server = http.createServer(async (req, res) => {
         req.on('end', async () => {
             try {
                 const { channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
-                const scanPath = path.join(VIDEO_SOURCE, sourceFolderName);
+                const scanPath = path.isAbsolute(sourceFolderName)
+                    ? sourceFolderName
+                    : path.join(VIDEO_SOURCE, sourceFolderName);
+
+                if (!fs.existsSync(scanPath)) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
+                }
+
                 const hlsCheckPath = path.join(scanPath, 'index.m3u8');
                 
                 // Busca o menor ID disponível (reutilizando IDs de canais excluídos)
