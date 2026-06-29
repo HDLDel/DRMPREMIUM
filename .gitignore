@@ -21,6 +21,12 @@ channels.json
 Thumbs.db
 desktop.ini
 
+# Arquivos de configuração sensíveis
+.env
+.env.*
+config.json
+config.*.json
+
 # Arquivos
 
 *.mp4
