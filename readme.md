@@ -1,94 +1,65 @@
-Configurações e Regras: .aiexclude, .gitignore, GEMINI.md, package.json, readme.md.
-Backend (Node.js): server.js.
-Frontend (HTML/JS/CSS): index.html, login.html, script.js, style.css.
-Scripts de Deploy/Servidor: install_ubuntu.sh, update_nginx.sh, nginx_iptv.conf.
-Dados e Logs: playlist.txt, grok_logs.csv.
+# DRMPREMIUM — Documentacao do Sistema
 
+**Servidor de canais IPTV 24 horas.** Converte pastas de videos MP4 em streams HLS ao vivo usando FFmpeg, servidos via Nginx com RAM disk. Painel web para gerenciar canais, monitorar CPU/RAM/disco/rede e exportar playlist M3U.
 
-O que procurar no Log:
+## Para quem e cada documento
 
-Non-matching parameters in input streams: Confirmaria que os vídeos da pasta são diferentes entre si.
-Error demuxing / Input/output error: Indica que o arquivo de vídeo está corrompido ou o disco falhou na leitura.
-Frame rate very high / Spewing statistics: Pode indicar que o servidor está sem CPU para processar aquele canal específico em tempo real.
+| Documento | Publico | Conteudo |
+|-----------|---------|----------|
+| `ARCHITECTURE.md` | Devs senior | Decisoes tecnicas, fluxo de dados, diagrama |
+| `API.md` | Devs integradores | Todos os endpoints REST com exemplos |
+| `DEVELOPER.md` | Devs mantenedores | Documentacao de funcoes, classes, variaveis |
+| `USER_GUIDE.md` | Usuarios finais | Manual do dashboard passo a passo |
+| `DEPLOY.md` | DevOps/Sysadmins | Instalacao, configuracao, producao |
 
+## Stack
 
-1. Sobre outros logs do sistema: Sim, você pode verificar se o sistema operacional está interrompendo o processo por falta de recursos (como memória) usando estes comandos no terminal:
+- **Backend:** Node.js puro (http module)
+- **Autenticacao:** bcrypt + cookie session (crypto.randomBytes)
+- **Video:** FFmpeg (HLS, concat, transcode libx264)
+- **Servidor web:** Nginx (proxy reverso + HLS segment serving)
+- **Armazenamento:** RAM disk `/dev/shm` (segmentos), JSON (config)
+- **Frontend:** HTML/CSS/JS vanilla, dark theme
+- **Producao:** PM2 + systemd
 
-dmesg | tail -n 50: Verifica se o "OOM Killer" (matador de processos por falta de memória) agiu.
-journalctl -u nginx --since "1 hour ago": Verifica se o Nginx reportou erros de conexão.
-pm2 logs iptv-pro: Mostra se o próprio Node.js está sofrendo algum crash interno.
+## Estrutura de diretorios
 
-comando para configurar a inicialização automática definitiva.
+```
+DRMPREMIUM/
+  server.js           → Servidor HTTP + API + FFmpeg + Watchdog
+  index.html          → Dashboard admin
+  login.html          → Tela de login
+  script.js           → Frontend JS
+  style.css           → Tema dark
+  channels.json       → Banco de canais (JSON)
+  playlist.txt        → Playlist concat de exemplo
+  package.json        → Dependencia: bcryptjs
+  nginx_iptv.conf     → Config Nginx
+  install_ubuntu.sh   → Instalador Ubuntu
+  update_nginx.sh     → Atualizar config Nginx
+  logs/               → Logs FFmpeg por canal
+  24HORAS/            → Pasta raiz de videos fonte
+  doc/                → Esta documentacao
+```
 
-pm2 start /home/drmpremium/server.js --name 24horas
+## Comandos rapidos
 
+```bash
+# Desenvolvimento
+node server.js
+
+# Producao com PM2
+pm2 start server.js --name iptv-pro
+pm2 save
 pm2 startup
 
-pm2 save
+# Nginx
+sudo cp nginx_iptv.conf /etc/nginx/sites-available/
+sudo ln -sf /etc/nginx/sites-available/nginx_iptv.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl restart nginx
 
-
-ls -ld /home/drmpremium/canais/*
-
-
-pm2 restart 24horas
-
-find /home/drmpremium/canais/ -maxdepth 1 -type l -delete
-
-
-ADMIN_USER=meuusuario ADMIN_PASS=minhasenha pm2 restart 24horas
-
-
-<BCRYPT_HASH_PLACEHOLDER>
-
-node -e "console.log(require('bcryptjs').hashSync('<REDACTED_PASSWORD>', 10))"
-
-
-ls -lh /dev/shm/iptv_canais/21
-
-ls -lh /dev/shm/iptv_canais
-
-ls -ld /home/drmpremium/canais/*
-
-
-monitoramento
-
-ps -fp $(pgrep -f "iptv_canais/5/") >> canal5.txt
-
-
-while true; do date >> canal5_full_monitor.txt; ps -fp $(pgrep -f "iptv_canais/5/") >> canal5_full_monitor.txt 2>&1; echo "--------------------------------" >> canal5_full_monitor.txt; sleep 5; done
-
-
-converte todos os arquivos da pasta 
-
-usando 100% da cpu
-mkdir -p convertidos && for f in *.mp4; do ffmpeg -i "$f" -c:v libx264 -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
-
-usando 50% da cpu
-mkdir -p convertidos && threads=$(($(nproc) / 2)); [ "$threads" -eq 0 ] && threads=1; for f in *.mp4; do ffmpeg -i "$f" -threads "$threads" -c:v libx264 -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
-
-usando 100 da gpu nvidia
-mkdir -p convertidos && for f in *.mp4; do ffmpeg -hwaccel cuda -i "$f" -c:v h264_nvenc -preset p7 -tune hq -profile:v high -level:v 4.0 -r 24 -vf "scale=1280:720" -c:a aac -ac 2 -ar 44100 "convertidos/$f"; done
-
--profile:v high -level:v 4.0: Define o perfil High e Nível 4.0.
-
--r 24: Estabelece o framerate fixo de 24 FPS (CFR).
-
--vf "scale=1280:720": Altera a resolução para as dimensões fixas de 1280x720.
-
--c:a aac: Força a re-encodagem de áudio para AAC.
-
--ac 2: Reduz ou mapeia os canais para Stereo.
-
--ar 44100: Define a taxa de amostragem em 44.1 kHz.r
-
-usa metade da cpu
-
-cp -rf "/convertidos/"* "/home/drmpremium/24HORAS/Black Kamen Rider Black RX/"
-
-
-cp -rf convertidos/* .
-
-
-for f in *.mp4; do echo "Verificando: $f"; ffmpeg -v error -i "$f" -f null -; done
-
-
+# Acesso
+http://localhost:8080          — Dashboard
+http://localhost:80            — Via Nginx (HLS + proxy)
+http://localhost:80/playlist.m3u  — Playlist IPTV
+```
