@@ -22,7 +22,7 @@ if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
 
 const NGINX_LOG = '/var/log/nginx/iptv_access.log';
 
-const FFMPEG_PATH = 'ffmpeg'; 
+const FFMPEG_PATH = 'ffmpeg';
 
 // Lista de Administradores com hashes seguros (bcrypt)
 const ADMINS = [
@@ -63,7 +63,7 @@ function getRealCpuUsage() {
     const current = getCpuTimes();
     const idleDiff = current.idle - lastCpuTimes.idle;
     const totalDiff = current.total - lastCpuTimes.total;
-    
+
     lastCpuTimes = current;
 
     if (totalDiff === 0) return 0;
@@ -107,7 +107,7 @@ async function getDirectoriesRecursive(base, root = base) {
     const visited = new Set();
     try {
         visited.add(fs.realpathSync(base));
-    } catch (e) {}
+    } catch (e) { }
 
     async function walk(dir) {
         try {
@@ -122,7 +122,7 @@ async function getDirectoriesRecursive(base, root = base) {
                     if (isDir) {
                         canonical = fs.realpathSync(res);
                     }
-                } catch (e) {}
+                } catch (e) { }
 
                 if (isDir && canonical && !visited.has(canonical)) {
                     visited.add(canonical);
@@ -130,7 +130,7 @@ async function getDirectoriesRecursive(base, root = base) {
                     await walk(res);
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
     }
     if (fs.existsSync(base)) await walk(base);
     return results;
@@ -142,7 +142,7 @@ async function getFilesRecursive(dir, extension) {
     const visited = new Set();
     try {
         visited.add(fs.realpathSync(dir));
-    } catch (e) {}
+    } catch (e) { }
 
     async function walk(currentDir) {
         try {
@@ -159,7 +159,7 @@ async function getFilesRecursive(dir, extension) {
                     if (isDir) {
                         canonical = fs.realpathSync(res);
                     }
-                } catch (e) {}
+                } catch (e) { }
 
                 if (isDir) {
                     if (canonical && !visited.has(canonical)) {
@@ -171,7 +171,7 @@ async function getFilesRecursive(dir, extension) {
                     results.push(res);
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
     }
     if (fs.existsSync(dir)) await walk(dir);
     return results;
@@ -296,12 +296,12 @@ function getDiskSpaceDetails() {
                     const avail = parts[3];
                     const usePercent = parts[4];
                     const mounted = parts[5];
-                    
+
                     // Filtrar apenas montagens de partições físicas reais ou mapeadas
                     const isPhysical = filesystem.startsWith('/dev/') || mounted.startsWith('/mnt') || mounted.startsWith('/home') || mounted.startsWith('/media') || mounted === '/';
                     const isVirtual = filesystem.includes('tmpfs') || filesystem.includes('loop') || filesystem.includes('udev');
                     const isBoot = mounted.startsWith('/boot');
-                    
+
                     if (isPhysical && !isVirtual && !isBoot) {
                         disks.push({
                             filesystem,
@@ -344,7 +344,7 @@ async function getSystemStats() {
     const disco = await getDiskUsage();
     const rede = await getNetworkUsage();
     const disksInfo = await getDiskSpaceDetailsCached();
-    
+
     return {
         cpu: cpuReal,
         io: io,
@@ -371,7 +371,7 @@ async function startChannel(id) {
     // Limpa arquivos antigos para o Watchdog não se confundir com timestamps do passado
     const m3u8Path = path.join(outputDir, 'index.m3u8');
     if (fs.existsSync(m3u8Path)) {
-        try { fs.unlinkSync(m3u8Path); } catch(e) {}
+        try { fs.unlinkSync(m3u8Path); } catch (e) { }
     }
 
     let playlistPath = channel.playlistFilePath;
@@ -384,7 +384,7 @@ async function startChannel(id) {
         console.log(`[CANAL ${id}] Escaneando pasta de origem: ${scanPath}`);
 
         let mp4Files = await getFilesRecursive(scanPath, '.mp4');
-        
+
         const validFiles = [];
         for (const f of mp4Files) {
             if (await isVideoValid(f)) {
@@ -407,7 +407,7 @@ async function startChannel(id) {
             const escaped = f.replace(/'/g, "'\\''");
             return `file '${escaped}'`;
         }).join('\r\n');
-        
+
         await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
         // Atualiza o caminho em memória para o processo atual
         channel.playlistFilePath = playlistPath;
@@ -436,9 +436,9 @@ async function startChannel(id) {
         // Modo Estável: Reconstrói o stream para evitar quebras em arquivos com FPS/Codecs diferentes
         args.push(
             '-fps_mode', 'cfr', // Força Constant Frame Rate para o transcode (necessário para -r 30)
-            '-c:v', 'libx264', 
-            '-preset', 'ultrafast', 
-            '-tune', 'zerolatency', 
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-tune', 'zerolatency',
             '-r', '24',          // Reduz para 24fps (mais leve que 30)
             '-g', '48',          // Keyframe a cada 2 segundos (2 * 24fps)
             '-crf', '28',        // Reduz a carga de processamento de imagem
@@ -472,7 +472,7 @@ async function startChannel(id) {
         const errMsg = `[ERRO CRÍTICO] Falha ao iniciar FFmpeg no canal ${id}: ${err.message}\n`;
         console.error(errMsg);
         logStream.write(errMsg);
-        
+
         // Se houver erro ao iniciar, limpamos os dados de tempo
         const ch = channels.find(c => c.id === id);
         if (ch) {
@@ -498,7 +498,7 @@ async function startChannel(id) {
 
         console.log(`Canal ${id} (${channel.name}) parou com código ${code}`);
         activeStreams.delete(id);
-        
+
         // Atualiza o objeto do canal para persistência
         const ch = channels.find(c => c.id === id);
         if (ch) {
@@ -528,460 +528,460 @@ const server = http.createServer(async (req, res) => {
     try {
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
-    // 1. Verificação de Autenticação
-    const cookies = getCookies(req);
-    const isAuth = cookies['session_token'] === SESSION_ID;
+        // 1. Verificação de Autenticação
+        const cookies = getCookies(req);
+        const isAuth = cookies['session_token'] === SESSION_ID;
 
-    // Rota pública de login
-    if (url.pathname === '/api/login' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-            const { user, pass } = JSON.parse(body);
-            
-            const cleanUser = user ? user.trim().toLowerCase() : '';
-            console.log(`[AUTH] Tentativa de login para: ${cleanUser}`);
+        // Rota pública de login
+        if (url.pathname === '/api/login' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+                const { user, pass } = JSON.parse(body);
 
-            const adminFound = ADMINS.find(a => a.user.toLowerCase() === cleanUser);
-            
-            const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
+                const cleanUser = user ? user.trim().toLowerCase() : '';
+                console.log(`[AUTH] Tentativa de login para: ${cleanUser}`);
 
-            if (!adminFound) console.log(`[AUTH] Falha: Usuário ${cleanUser} não encontrado.`);
-            if (adminFound && !isPasswordValid) console.log(`[AUTH] Falha: Senha incorreta para ${cleanUser}.`);
+                const adminFound = ADMINS.find(a => a.user.toLowerCase() === cleanUser);
 
-            if (adminFound && isPasswordValid) {
-                console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser}.`);
-                res.writeHead(200, { 
-                    'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
-                    'Content-Type': 'application/json' 
-                });
-                res.end(JSON.stringify({ status: 'success' }));
-            } else {
-                res.writeHead(401);
-                res.end(JSON.stringify({ status: 'error' }));
-            }
-        });
-        return;
-    }
+                const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
 
-    // Rota de Logout
-    if (url.pathname === '/api/logout' && req.method === 'POST') {
-        res.writeHead(200, {
-            'Set-Cookie': `session_token=; Path=/; HttpOnly; Expires=${new Date(0).toUTCString()}`,
-            'Content-Type': 'application/json'
-        });
-        return res.end(JSON.stringify({ status: 'logged_out' }));
-    }
+                if (!adminFound) console.log(`[AUTH] Falha: Usuário ${cleanUser} não encontrado.`);
+                if (adminFound && !isPasswordValid) console.log(`[AUTH] Falha: Senha incorreta para ${cleanUser}.`);
 
-    // Rota Pública da Playlist M3U para Players de IPTV
-    if (url.pathname === '/playlist.m3u') {
-        const host = req.headers.host || 'localhost';
-        const protocol = req.headers['x-forwarded-proto'] || 'http';
-        let m3uContent = '#EXTM3U\n';
-        
-        for (const channel of channels) {
-            const cleanName = channel.name.trim();
-            m3uContent += `#EXTINF:-1 tvg-name="${cleanName}" tvg-logo="" group-title="",${cleanName}\n`;
-            m3uContent += `${protocol}://${host}/canais/${channel.id}/index.m3u8\n`;
-        }
-        
-        res.writeHead(200, {
-            'Content-Type': 'application/x-mpegurl',
-            'Content-Disposition': 'attachment; filename="playlist.m3u"',
-            'Access-Control-Allow-Origin': '*'
-        });
-        return res.end(m3uContent);
-    }
-
-    // API: Alternar status +18 de um canal
-    if (url.pathname === '/api/toggle18' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            const data = JSON.parse(body);
-            const id = Number(data.id);
-            const channel = channels.find(c => c.id === id);
-            if (channel) {
-                channel.is18 = !channel.is18;
-                await saveChannels();
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'success', is18: channel.is18 }));
-            } else {
-                res.writeHead(404);
-                res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
-            }
-        });
-        return;
-    }
-
-    // Redireciona para login se não estiver autenticado
-    if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
-        res.writeHead(302, { 'Location': '/login.html' });
-        return res.end();
-    }
-
-    // Roteamento de API
-    if (url.pathname === '/api/status') {
-        const stats = await getSystemStats();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(stats));
-    }
-
-    // API: Buscar Logs de um canal
-    if (url.pathname === '/api/logs' && req.method === 'GET') {
-        const id = url.searchParams.get('id');
-        const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
-        
-        if (fs.existsSync(logPath)) {
-            // Lê apenas os últimos 5KB do log para não sobrecarregar
-            const stats = fs.statSync(logPath);
-            const start = Math.max(0, stats.size - 5120);
-            const stream = fs.createReadStream(logPath, { start });
-            res.writeHead(200, { 'Content-Type': 'text/plain' });
-            return stream.pipe(res);
-        }
-        res.writeHead(404);
-        return res.end("Log não encontrado.");
-    }
-
-    if (url.pathname === '/api/start' && req.method === 'POST') {
-        let body = ''; // Removed canalNome from startChannel call
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            const data = JSON.parse(body);
-            const result = await startChannel(Number(data.id)); 
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(result)); // Return result
-        });
-        return;
-    }
-
-    // API: Listar todos os canais
-    if (url.pathname === '/api/channels') {
-        const channelsWithUptime = channels.map(c => {
-            return {
-                ...c,
-                uptime: (c.status === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
-            };
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(channelsWithUptime));
-    }
-
-    // API: Listar pastas e subpastas para o Select do Modal
-    if (url.pathname === '/api/videosources') {
-        try {
-            if (!fs.existsSync(VIDEO_SOURCE)) {
-                fs.mkdirSync(VIDEO_SOURCE, { recursive: true });
-            }
-            const folders = await getDirectoriesRecursive(VIDEO_SOURCE);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify(folders));
-        } catch (error) {
-            console.error("Erro ao listar diretórios:", error);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ error: "Falha ao ler pastas" }));
-        }
-    }
-
-    // API: Criar canal escaneando a pasta selecionada
-    if (url.pathname === '/api/createchannel' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            try {
-                const { channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
-                const scanPath = path.isAbsolute(sourceFolderName)
-                    ? sourceFolderName
-                    : path.join(VIDEO_SOURCE, sourceFolderName);
-
-                if (!fs.existsSync(scanPath)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
-                }
-
-                const hlsCheckPath = path.join(scanPath, 'index.m3u8');
-                
-                // Busca o menor ID disponível (reutilizando IDs de canais excluídos)
-                let id = 1;
-                while (channels.some(c => c.id === id)) {
-                    id++;
-                }
-
-                const channelOutputDir = path.join(CHANNELS_DIR, id.toString());
-                if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
-
-                let inputType = 'concat';
-                let playlistFilePath = '';
-
-                // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
-                if (fs.existsSync(hlsCheckPath)) {
-                    inputType = 'hls';
-                    playlistFilePath = hlsCheckPath;
+                if (adminFound && isPasswordValid) {
+                    console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser}.`);
+                    res.writeHead(200, {
+                        'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
+                        'Content-Type': 'application/json'
+                    });
+                    res.end(JSON.stringify({ status: 'success' }));
                 } else {
-                    let mp4Files = await getFilesRecursive(scanPath, '.mp4');
-                    
-                    // Validação de integridade para evitar o erro 'moov atom not found'
-                    const validFiles = [];
-                    for (const f of mp4Files) {
-                        if (await isVideoValid(f)) validFiles.push(f);
-                        else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
-                    }
-                    mp4Files = validFiles;
-
-                    if (mp4Files.length === 0) {
-                        res.writeHead(400, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
-                    }
-
-                    const playlistPath = path.join(channelOutputDir, 'playlist.txt');
-                    // Melhora a compatibilidade com caminhos complexos e aspas simples
-                    const playlistContent = mp4Files.map(f => {
-                        const escaped = f.replace(/'/g, "'\\''");
-                        return `file '${escaped}'`;
-                    }).join('\r\n');
-                    
-                    await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
-                    
-                    inputType = 'concat';
-                    playlistFilePath = playlistPath;
+                    res.writeHead(401);
+                    res.end(JSON.stringify({ status: 'error' }));
                 }
+            });
+            return;
+        }
 
-                const newChannel = {
-                    id,
-                    name: channelName,
-                    sourceFolder: sourceFolderName,
-                    playlistFilePath,
-                    inputType,
-                    status: 'offline',
-                    useTranscode: !!useTranscode,
-                    is18: !!is18
-                };
+        // Rota de Logout
+        if (url.pathname === '/api/logout' && req.method === 'POST') {
+            res.writeHead(200, {
+                'Set-Cookie': `session_token=; Path=/; HttpOnly; Expires=${new Date(0).toUTCString()}`,
+                'Content-Type': 'application/json'
+            });
+            return res.end(JSON.stringify({ status: 'logged_out' }));
+        }
 
-                channels.push(newChannel);
-                await saveChannels();
+        // Rota Pública da Playlist M3U para Players de IPTV
+        if (url.pathname === '/playlist.m3u') {
+            const host = req.headers.host || 'localhost';
+            const protocol = req.headers['x-forwarded-proto'] || 'http';
+            let m3uContent = '#EXTM3U\n';
 
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'success', channel: newChannel }));
-            } catch (err) {
-                console.error(err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao criar canal.' }));
+            for (const channel of channels) {
+                const cleanName = channel.name.trim();
+                m3uContent += `#EXTINF:-1 tvg-name="${cleanName}" tvg-logo="" group-title="",${cleanName}\n`;
+                m3uContent += `${protocol}://${host}/canais/${channel.id}/index.m3u8\n`;
             }
-        });
-        return;
-    }
 
-    // API: Editar/Atualizar canal existente (Mantém o ID original intacto)
-    if (url.pathname === '/api/updatechannel' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            try {
-                const { id, channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
-                const channelId = Number(id);
-                const channel = channels.find(c => c.id === channelId);
-                
-                if (!channel) {
-                    res.writeHead(404, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado.' }));
-                }
+            res.writeHead(200, {
+                'Content-Type': 'application/x-mpegurl',
+                'Content-Disposition': 'attachment; filename="playlist.m3u"',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(m3uContent);
+        }
 
-                // Segurança: Não permite editar canal ativo
-                if (activeStreams.has(channelId)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de editá-lo.' }));
-                }
-
-                const scanPath = path.isAbsolute(sourceFolderName)
-                    ? sourceFolderName
-                    : path.join(VIDEO_SOURCE, sourceFolderName);
-
-                if (!fs.existsSync(scanPath)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
-                }
-
-                const hlsCheckPath = path.join(scanPath, 'index.m3u8');
-                const channelOutputDir = path.join(CHANNELS_DIR, channelId.toString());
-                if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
-
-                let inputType = 'concat';
-                let playlistFilePath = '';
-
-                // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
-                if (fs.existsSync(hlsCheckPath)) {
-                    inputType = 'hls';
-                    playlistFilePath = hlsCheckPath;
+        // API: Alternar status +18 de um canal
+        if (url.pathname === '/api/toggle18' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                const data = JSON.parse(body);
+                const id = Number(data.id);
+                const channel = channels.find(c => c.id === id);
+                if (channel) {
+                    channel.is18 = !channel.is18;
+                    await saveChannels();
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'success', is18: channel.is18 }));
                 } else {
-                    let mp4Files = await getFilesRecursive(scanPath, '.mp4');
-                    
-                    const validFiles = [];
-                    for (const f of mp4Files) {
-                        if (await isVideoValid(f)) validFiles.push(f);
-                        else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
-                    }
-                    mp4Files = validFiles;
-
-                    if (mp4Files.length === 0) {
-                        res.writeHead(400, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
-                    }
-
-                    const playlistPath = path.join(channelOutputDir, 'playlist.txt');
-                    const playlistContent = mp4Files.map(f => {
-                        const escaped = f.replace(/'/g, "'\\''");
-                        return `file '${escaped}'`;
-                    }).join('\r\n');
-                    
-                    await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
-                    
-                    inputType = 'concat';
-                    playlistFilePath = playlistPath;
+                    res.writeHead(404);
+                    res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
                 }
+            });
+            return;
+        }
 
-                // Atualiza os dados do canal sem alterar o ID original
-                channel.name = channelName;
-                channel.sourceFolder = sourceFolderName;
-                channel.playlistFilePath = playlistFilePath;
-                channel.inputType = inputType;
-                channel.useTranscode = !!useTranscode;
-                channel.is18 = !!is18;
+        // Redireciona para login se não estiver autenticado
+        if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
+            res.writeHead(302, { 'Location': '/login.html' });
+            return res.end();
+        }
 
-                await saveChannels();
+        // Roteamento de API
+        if (url.pathname === '/api/status') {
+            const stats = await getSystemStats();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(stats));
+        }
 
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'success', channel }));
-            } catch (err) {
-                console.error(err);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao atualizar canal.' }));
-            }
-        });
-        return;
-    }
-
-    // API: Excluir canal
-    if (url.pathname === '/api/delete' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            const data = JSON.parse(body);
-            const id = Number(data.id);
-
-            // 1. Segurança: Não permite excluir se estiver rodando
-            if (activeStreams.has(id)) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de excluí-lo.' }));
-            }
-
-            // 2. Remove da lista e salva banco
-            channels = channels.filter(c => c.id !== id);
-            await saveChannels();
-
-            // 3. Limpa arquivos físicos
-            const channelPath = path.join(CHANNELS_DIR, id.toString());
+        // API: Buscar Logs de um canal
+        if (url.pathname === '/api/logs' && req.method === 'GET') {
+            const id = url.searchParams.get('id');
             const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
 
-            // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
-            setTimeout(() => {
-                try {
-                    if (fs.existsSync(channelPath)) fs.rmSync(channelPath, { recursive: true, force: true });
-                    if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
-                    console.log(`[LIMPEZA] Canal e logs de ${id} removidos.`);
-                } catch (rmErr) {
-                    console.error(`[ERRO] Falha na remoção do canal ${id}:`, rmErr);
-                }
-            }, 1000);
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ status: 'deleted' }));
-        });
-        return;
-    }
-
-    if (url.pathname === '/api/stop' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-            const data = JSON.parse(body);
-            const id = Number(data.id);
-            
-            const channel = channels.find(c => c.id === id);
-            if (channel) channel.status = 'offline';
-
-            if (activeStreams.has(id)) {
-                activeStreams.get(id).process.kill('SIGKILL');
-                activeStreams.delete(id);
+            if (fs.existsSync(logPath)) {
+                // Lê apenas os últimos 5KB do log para não sobrecarregar
+                const stats = fs.statSync(logPath);
+                const start = Math.max(0, stats.size - 5120);
+                const stream = fs.createReadStream(logPath, { start });
+                res.writeHead(200, { 'Content-Type': 'text/plain' });
+                return stream.pipe(res);
             }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ status: 'stopped' }));
-        });
-        return;
-    }
-
-    if (url.pathname === '/api/startall' && req.method === 'POST') {
-        const started = [];
-        for (const channel of channels) {
-            if (channel.status === 'offline' && !activeStreams.has(channel.id)) {
-                const result = await startChannel(channel.id);
-                if (result.status === 'success') {
-                    started.push(channel.name);
-                }
-            }
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'success', started }));
-    }
-
-    if (url.pathname === '/api/stopall' && req.method === 'POST') {
-        const stopped = [];
-        for (const channel of channels) {
-            if (channel.status === 'online' || activeStreams.has(channel.id)) {
-                channel.status = 'offline';
-                if (activeStreams.has(channel.id)) {
-                    try {
-                        activeStreams.get(channel.id).process.kill('SIGKILL');
-                    } catch (e) {
-                        console.error(`Erro ao parar canal ${channel.id}:`, e);
-                    }
-                    activeStreams.delete(channel.id);
-                }
-                stopped.push(channel.name);
-            }
-        }
-        await saveChannels();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'success', stopped }));
-    }
-
-    // Servir Arquivos Estáticos (Dashboard)
-    let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
-    
-    fs.readFile(filePath, (err, content) => {
-        if (err) {
             res.writeHead(404);
-            res.end('Não encontrado');
-        } else {
-            const ext = path.extname(filePath);
-            const types = { 
-                '.html': 'text/html', 
-                '.js': 'text/javascript', 
-                '.css': 'text/css',
-                '.m3u8': 'application/vnd.apple.mpegurl',
-                '.ts': 'video/MP2T'
-            };
-            
-            const headers = { 'Content-Type': types[ext] || 'text/plain' };
-            // Impede que o navegador faça cache do painel (Dashboard)
-            if (ext === '.js' || ext === '.css' || ext === '.html') {
-                headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
-            }
-
-            res.writeHead(200, headers);
-            res.end(content);
+            return res.end("Log não encontrado.");
         }
-    });
+
+        if (url.pathname === '/api/start' && req.method === 'POST') {
+            let body = ''; // Removed canalNome from startChannel call
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                const data = JSON.parse(body);
+                const result = await startChannel(Number(data.id));
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result)); // Return result
+            });
+            return;
+        }
+
+        // API: Listar todos os canais
+        if (url.pathname === '/api/channels') {
+            const channelsWithUptime = channels.map(c => {
+                return {
+                    ...c,
+                    uptime: (c.status === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
+                };
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(channelsWithUptime));
+        }
+
+        // API: Listar pastas e subpastas para o Select do Modal
+        if (url.pathname === '/api/videosources') {
+            try {
+                if (!fs.existsSync(VIDEO_SOURCE)) {
+                    fs.mkdirSync(VIDEO_SOURCE, { recursive: true });
+                }
+                const folders = await getDirectoriesRecursive(VIDEO_SOURCE);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify(folders));
+            } catch (error) {
+                console.error("Erro ao listar diretórios:", error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: "Falha ao ler pastas" }));
+            }
+        }
+
+        // API: Criar canal escaneando a pasta selecionada
+        if (url.pathname === '/api/createchannel' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                try {
+                    const { channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
+                    const scanPath = path.isAbsolute(sourceFolderName)
+                        ? sourceFolderName
+                        : path.join(VIDEO_SOURCE, sourceFolderName);
+
+                    if (!fs.existsSync(scanPath)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
+                    }
+
+                    const hlsCheckPath = path.join(scanPath, 'index.m3u8');
+
+                    // Busca o menor ID disponível (reutilizando IDs de canais excluídos)
+                    let id = 1;
+                    while (channels.some(c => c.id === id)) {
+                        id++;
+                    }
+
+                    const channelOutputDir = path.join(CHANNELS_DIR, id.toString());
+                    if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
+
+                    let inputType = 'concat';
+                    let playlistFilePath = '';
+
+                    // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
+                    if (fs.existsSync(hlsCheckPath)) {
+                        inputType = 'hls';
+                        playlistFilePath = hlsCheckPath;
+                    } else {
+                        let mp4Files = await getFilesRecursive(scanPath, '.mp4');
+
+                        // Validação de integridade para evitar o erro 'moov atom not found'
+                        const validFiles = [];
+                        for (const f of mp4Files) {
+                            if (await isVideoValid(f)) validFiles.push(f);
+                            else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
+                        }
+                        mp4Files = validFiles;
+
+                        if (mp4Files.length === 0) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        }
+
+                        const playlistPath = path.join(channelOutputDir, 'playlist.txt');
+                        // Melhora a compatibilidade com caminhos complexos e aspas simples
+                        const playlistContent = mp4Files.map(f => {
+                            const escaped = f.replace(/'/g, "'\\''");
+                            return `file '${escaped}'`;
+                        }).join('\r\n');
+
+                        await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
+
+                        inputType = 'concat';
+                        playlistFilePath = playlistPath;
+                    }
+
+                    const newChannel = {
+                        id,
+                        name: channelName,
+                        sourceFolder: sourceFolderName,
+                        playlistFilePath,
+                        inputType,
+                        status: 'offline',
+                        useTranscode: !!useTranscode,
+                        is18: !!is18
+                    };
+
+                    channels.push(newChannel);
+                    await saveChannels();
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'success', channel: newChannel }));
+                } catch (err) {
+                    console.error(err);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao criar canal.' }));
+                }
+            });
+            return;
+        }
+
+        // API: Editar/Atualizar canal existente (Mantém o ID original intacto)
+        if (url.pathname === '/api/updatechannel' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                try {
+                    const { id, channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
+                    const channelId = Number(id);
+                    const channel = channels.find(c => c.id === channelId);
+
+                    if (!channel) {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado.' }));
+                    }
+
+                    // Segurança: Não permite editar canal ativo
+                    if (activeStreams.has(channelId)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de editá-lo.' }));
+                    }
+
+                    const scanPath = path.isAbsolute(sourceFolderName)
+                        ? sourceFolderName
+                        : path.join(VIDEO_SOURCE, sourceFolderName);
+
+                    if (!fs.existsSync(scanPath)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
+                    }
+
+                    const hlsCheckPath = path.join(scanPath, 'index.m3u8');
+                    const channelOutputDir = path.join(CHANNELS_DIR, channelId.toString());
+                    if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
+
+                    let inputType = 'concat';
+                    let playlistFilePath = '';
+
+                    // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
+                    if (fs.existsSync(hlsCheckPath)) {
+                        inputType = 'hls';
+                        playlistFilePath = hlsCheckPath;
+                    } else {
+                        let mp4Files = await getFilesRecursive(scanPath, '.mp4');
+
+                        const validFiles = [];
+                        for (const f of mp4Files) {
+                            if (await isVideoValid(f)) validFiles.push(f);
+                            else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
+                        }
+                        mp4Files = validFiles;
+
+                        if (mp4Files.length === 0) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        }
+
+                        const playlistPath = path.join(channelOutputDir, 'playlist.txt');
+                        const playlistContent = mp4Files.map(f => {
+                            const escaped = f.replace(/'/g, "'\\''");
+                            return `file '${escaped}'`;
+                        }).join('\r\n');
+
+                        await fs.promises.writeFile(playlistPath, playlistContent, 'utf8');
+
+                        inputType = 'concat';
+                        playlistFilePath = playlistPath;
+                    }
+
+                    // Atualiza os dados do canal sem alterar o ID original
+                    channel.name = channelName;
+                    channel.sourceFolder = sourceFolderName;
+                    channel.playlistFilePath = playlistFilePath;
+                    channel.inputType = inputType;
+                    channel.useTranscode = !!useTranscode;
+                    channel.is18 = !!is18;
+
+                    await saveChannels();
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'success', channel }));
+                } catch (err) {
+                    console.error(err);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao atualizar canal.' }));
+                }
+            });
+            return;
+        }
+
+        // API: Excluir canal
+        if (url.pathname === '/api/delete' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', async () => {
+                const data = JSON.parse(body);
+                const id = Number(data.id);
+
+                // 1. Segurança: Não permite excluir se estiver rodando
+                if (activeStreams.has(id)) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de excluí-lo.' }));
+                }
+
+                // 2. Remove da lista e salva banco
+                channels = channels.filter(c => c.id !== id);
+                await saveChannels();
+
+                // 3. Limpa arquivos físicos
+                const channelPath = path.join(CHANNELS_DIR, id.toString());
+                const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
+
+                // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
+                setTimeout(() => {
+                    try {
+                        if (fs.existsSync(channelPath)) fs.rmSync(channelPath, { recursive: true, force: true });
+                        if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+                        console.log(`[LIMPEZA] Canal e logs de ${id} removidos.`);
+                    } catch (rmErr) {
+                        console.error(`[ERRO] Falha na remoção do canal ${id}:`, rmErr);
+                    }
+                }, 1000);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'deleted' }));
+            });
+            return;
+        }
+
+        if (url.pathname === '/api/stop' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+                const data = JSON.parse(body);
+                const id = Number(data.id);
+
+                const channel = channels.find(c => c.id === id);
+                if (channel) channel.status = 'offline';
+
+                if (activeStreams.has(id)) {
+                    activeStreams.get(id).process.kill('SIGKILL');
+                    activeStreams.delete(id);
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'stopped' }));
+            });
+            return;
+        }
+
+        if (url.pathname === '/api/startall' && req.method === 'POST') {
+            const started = [];
+            for (const channel of channels) {
+                if (channel.status === 'offline' && !activeStreams.has(channel.id)) {
+                    const result = await startChannel(channel.id);
+                    if (result.status === 'success') {
+                        started.push(channel.name);
+                    }
+                }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'success', started }));
+        }
+
+        if (url.pathname === '/api/stopall' && req.method === 'POST') {
+            const stopped = [];
+            for (const channel of channels) {
+                if (channel.status === 'online' || activeStreams.has(channel.id)) {
+                    channel.status = 'offline';
+                    if (activeStreams.has(channel.id)) {
+                        try {
+                            activeStreams.get(channel.id).process.kill('SIGKILL');
+                        } catch (e) {
+                            console.error(`Erro ao parar canal ${channel.id}:`, e);
+                        }
+                        activeStreams.delete(channel.id);
+                    }
+                    stopped.push(channel.name);
+                }
+            }
+            await saveChannels();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'success', stopped }));
+        }
+
+        // Servir Arquivos Estáticos (Dashboard)
+        let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
+
+        fs.readFile(filePath, (err, content) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('Não encontrado');
+            } else {
+                const ext = path.extname(filePath);
+                const types = {
+                    '.html': 'text/html',
+                    '.js': 'text/javascript',
+                    '.css': 'text/css',
+                    '.m3u8': 'application/vnd.apple.mpegurl',
+                    '.ts': 'video/MP2T'
+                };
+
+                const headers = { 'Content-Type': types[ext] || 'text/plain' };
+                // Impede que o navegador faça cache do painel (Dashboard)
+                if (ext === '.js' || ext === '.css' || ext === '.html') {
+                    headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+                }
+
+                res.writeHead(200, headers);
+                res.end(content);
+            }
+        });
     } catch (err) {
         console.error("[ERRO NO SERVIDOR]", err);
         res.writeHead(500);
@@ -999,14 +999,14 @@ setInterval(() => {
         if (!channel || channel.status !== 'online') return;
 
         const m3u8Path = path.join(CHANNELS_DIR, id.toString(), 'index.m3u8');
-        
+
         if (fs.existsSync(m3u8Path)) {
             const stats = fs.statSync(m3u8Path);
             const segundosDesdeMod = (Date.now() - stats.mtimeMs) / 1000;
-            
+
             if (segundosDesdeMod > 120) { // Aumentado para 120s para evitar falsos positivos com segmentos de 15s
                 console.log(`[WATCHDOG] Canal ${id} (${channel.name}) sem resposta há ${Math.round(segundosDesdeMod)}s. Reiniciando...`);
-                
+
                 // Registra o travamento no log antes de matar o processo
                 const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
                 if (fs.existsSync(logPath)) {
@@ -1043,7 +1043,7 @@ setInterval(() => {
 
 server.listen(PORT, async () => {
     await loadChannels(); // Load channels on startup
-    
+
     // Auto-start: Verifica canais que deveriam estar online e inicia o FFmpeg
     for (const channel of channels) {
         if (channel.status === 'online') {
