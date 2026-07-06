@@ -1011,39 +1011,44 @@ const server = http.createServer(async (req, res) => {
                 return res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
             }
 
-            const playlistPath = path.join(CHANNELS_DIR, id.toString(), 'playlist.txt');
-            if (!fs.existsSync(playlistPath)) {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'error', message: 'Playlist não encontrada' }));
+            const outputDir = `/home/drmpremium/hls_pronto/${id}`;
+            const flagPath = `/home/drmpremium/.vod_${id}`;
+            const vodIndex = `${outputDir}/index.m3u8`;
+
+            // Se VOD já existir, só ativa o modo (flag) sem reconverter
+            if (fs.existsSync(vodIndex)) {
+                console.log(`[CONVERT] VOD já existe para canal ${id}, ativando modo VOD...`);
+            } else {
+                const playlistPath = path.join(CHANNELS_DIR, id.toString(), 'playlist.txt');
+                if (!fs.existsSync(playlistPath)) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ status: 'error', message: 'Playlist não encontrada' }));
+                }
+
+                if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+                console.log(`[CONVERT] Convertendo canal ${id} (${channel.name}) para VOD...`);
+                const proc = spawn(FFMPEG_PATH, [
+                    '-fflags', '+genpts+igndts+flush_packets',
+                    '-err_detect', 'ignore_err',
+                    '-f', 'concat', '-safe', '0',
+                    '-i', playlistPath,
+                    '-c:v', 'copy',
+                    '-c:a', 'copy',
+                    '-f', 'hls',
+                    '-hls_time', '15',
+                    '-hls_playlist_type', 'vod',
+                    '-hls_list_size', '0',
+                    '-hls_segment_filename', `${outputDir}/segment_%03d.ts`,
+                    `${outputDir}/index.m3u8`
+                ]);
+                proc.stderr.on('data', () => {});
+                await new Promise(resolve => proc.on('close', resolve));
+                console.log(`[CONVERT] Conversão concluída para canal ${id}`);
             }
 
-            const outputDir = `/home/drmpremium/hls_pronto/${id}`;
-            if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
-            // Limpa VODs antigos
-            fs.readdirSync(outputDir).forEach(f => {
-                if (f.endsWith('.ts') || f === 'index.m3u8') {
-                    fs.unlinkSync(path.join(outputDir, f));
-                }
-            });
-
-            console.log(`[CONVERT] Convertendo canal ${id} (${channel.name}) para VOD...`);
-            const proc = spawn(FFMPEG_PATH, [
-                '-fflags', '+genpts+igndts+flush_packets',
-                '-err_detect', 'ignore_err',
-                '-f', 'concat', '-safe', '0',
-                '-i', playlistPath,
-                '-c:v', 'copy',
-                '-c:a', 'copy',
-                '-f', 'hls',
-                '-hls_time', '15',
-                '-hls_playlist_type', 'vod',
-                '-hls_list_size', '0',
-                '-hls_segment_filename', `${outputDir}/segment_%03d.ts`,
-                `${outputDir}/index.m3u8`
-            ]);
-            proc.stderr.on('data', () => {});
-            await new Promise(resolve => proc.on('close', resolve));
+            // Cria flag file (nginx check)
+            fs.writeFileSync(flagPath, '');
 
             channel.status = 'vod';
             channel.startedAt = undefined;
@@ -1069,6 +1074,100 @@ const server = http.createServer(async (req, res) => {
             console.log(`[CONVERT] Canal ${id} convertido para VOD`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'success' }));
+        });
+        return;
+    }
+
+    // API: Toggle VOD mode para um canal
+    if (url.pathname === '/api/toggle-vod' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const { id } = JSON.parse(body);
+            const channel = channels.find(c => c.id === id);
+            if (!channel) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
+            }
+
+            const flagPath = `/home/drmpremium/.vod_${id}`;
+            const vodDir = `/home/drmpremium/hls_pronto/${id}`;
+            const isVod = fs.existsSync(flagPath);
+
+            if (isVod) {
+                // VOD → LIVE: remove flag, inicia ffmpeg
+                try { fs.unlinkSync(flagPath); } catch (e) {}
+                channel.status = 'online';
+                channel.startedAt = undefined;
+                await saveChannels();
+
+                const result = await startChannel(id);
+                console.log(`[TOGGLE] Canal ${id} alternado para LIVE`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'success', mode: 'live' }));
+            } else {
+                // LIVE → VOD: cria flag, se VOD não existir converte
+                if (!fs.existsSync(vodDir) || !fs.existsSync(`${vodDir}/index.m3u8`)) {
+                    // Converte primeiro
+                    const playlistPath = channel.playlistFilePath;
+                    if (!fs.existsSync(playlistPath)) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'Playlist não encontrada' }));
+                    }
+                    if (!fs.existsSync(vodDir)) fs.mkdirSync(vodDir, { recursive: true });
+                    fs.readdirSync(vodDir).forEach(f => {
+                        if (f.endsWith('.ts') || f === 'index.m3u8') {
+                            try { fs.unlinkSync(path.join(vodDir, f)); } catch (e) {}
+                        }
+                    });
+                    console.log(`[TOGGLE] Convertendo canal ${id} para VOD...`);
+                    const proc = spawn(FFMPEG_PATH, [
+                        '-fflags', '+genpts+igndts+flush_packets',
+                        '-err_detect', 'ignore_err',
+                        '-f', 'concat', '-safe', '0',
+                        '-i', playlistPath,
+                        '-c:v', 'copy',
+                        '-c:a', 'copy',
+                        '-f', 'hls',
+                        '-hls_time', '15',
+                        '-hls_playlist_type', 'vod',
+                        '-hls_list_size', '0',
+                        '-hls_segment_filename', `${vodDir}/segment_%03d.ts`,
+                        `${vodDir}/index.m3u8`
+                    ]);
+                    proc.stderr.on('data', () => {});
+                    await new Promise(resolve => proc.on('close', resolve));
+                    console.log(`[TOGGLE] Conversão concluída para canal ${id}`);
+                }
+
+                // Cria flag e para o live
+                fs.writeFileSync(flagPath, '');
+                channel.status = 'vod';
+                channel.startedAt = undefined;
+                await saveChannels();
+
+                if (activeStreams.has(id)) {
+                    try { activeStreams.get(id).process.kill('SIGKILL'); } catch (e) {}
+                    activeStreams.delete(id);
+                }
+
+                // Limpa live HLS
+                const liveDir = path.join(CHANNELS_DIR, id.toString());
+                try {
+                    if (fs.existsSync(liveDir)) {
+                        fs.readdirSync(liveDir).forEach(f => {
+                            if (f.endsWith('.ts') || f.endsWith('.m3u8')) {
+                                fs.unlinkSync(path.join(liveDir, f));
+                            }
+                        });
+                    }
+                } catch (e) {}
+
+                await saveChannels();
+                console.log(`[TOGGLE] Canal ${id} alternado para VOD`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'success', mode: 'vod' }));
+            }
         });
         return;
     }
@@ -1176,6 +1275,16 @@ server.listen(PORT, async () => {
         if (channel.status === 'online') {
             console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
             await startChannel(channel.id);
+        }
+    }
+    // Cria flag files para canais em modo VOD (nginx check)
+    for (const channel of channels) {
+        if (channel.status === 'vod') {
+            const flagPath = `/home/drmpremium/.vod_${channel.id}`;
+            if (!fs.existsSync(flagPath)) {
+                fs.writeFileSync(flagPath, '');
+                console.log(`[AUTO-START] Flag VOD criada para canal ${channel.id} (${channel.name})`);
+            }
         }
     }
 
