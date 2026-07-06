@@ -38,49 +38,112 @@
         </div>
     </div>
 
-    <!-- Nova seção de Armazenamento SSD -->
-    <div class="storage-section" style="background: var(--card); border-radius: 12px; padding: 20px; border: 1px solid #30363d; margin-bottom: 40px;">
-        <h2 style="margin-top: 0; display: flex; align-items: center; gap: 10px; font-size: 1.4rem;">
-            💾 Armazenamento do Sistema (SSDs/Discos)
-        </h2>
-        <div id="disks-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-            <div style="color: #8b949e;">Carregando informações de armazenamento...</div>
-        </div>
+    <!-- Abas de navegação -->
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('canais')">📺 Canais</button>
+        <button class="tab-btn" onclick="switchTab('seguranca')">🔒 Segurança</button>
     </div>
 
-    <div class="channel-list">
-        <h2>Canais Disponíveis</h2>
-        <div class="search-bar">
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <input type="text" id="search-input" placeholder="Buscar canais...">
-                <select id="filter-select" onchange="handleSearch()" style="padding: 8px; border-radius: 4px; border: 1px solid #30363d; background: #0a0e14; color: var(--text); font-weight: bold; cursor: pointer; transition: border-color 0.2s;">
-                    <option value="all">📺 Todos os Canais</option>
-                    <option value="18">🔞 Apenas +18</option>
-                    <option value="family">👶 Sem +18 (Livre)</option>
-                </select>
-            </div>
-            <div>
-                <button onclick="startAll()" style="background:#10b981; color:white; margin-right:10px;">▶ Iniciar Todos</button>
-                <button onclick="stopAll()" style="background:#ef4444; color:white; margin-right:10px;">⏹ Parar Todos</button>
-                <button onclick="downloadM3U()" style="background:#2563eb; color:white; margin-right:10px;">💾 Exportar M3U (Baixar)</button>
-                <button onclick="copyM3ULink()" style="background:#6e7681; color:white; margin-right:10px;">🔗 Copiar Link M3U</button>
-                <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
+    <!-- Aba: Canais -->
+    <div id="tab-canais" class="tab-content active">
+
+        <!-- Nova seção de Armazenamento SSD -->
+        <div class="storage-section" style="background: var(--card); border-radius: 12px; padding: 20px; border: 1px solid #30363d; margin-bottom: 40px;">
+            <h2 style="margin-top: 0; display: flex; align-items: center; gap: 10px; font-size: 1.4rem;">
+                💾 Armazenamento do Sistema (SSDs/Discos)
+            </h2>
+            <div id="disks-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                <div style="color: #8b949e;">Carregando informações de armazenamento...</div>
             </div>
         </div>
-        <table>
-            <thead>
-                <tr>
-                    <th onclick="sortTable('id')">ID <span id="sort-icon-id"></span></th>
-                    <th onclick="sortTable('name')">Nome <span id="sort-icon-name"></span></th>
-                    <th onclick="sortTable('status')">Status <span id="sort-icon-status"></span></th>
-                    <th onclick="sortTable('uptime')">Uptime <span id="sort-icon-uptime"></span></th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody id="channels-table">
-                <!-- Canais serão carregados aqui via JavaScript -->
-            </tbody>
-        </table>
+
+        <div class="channel-list">
+            <h2>Canais Disponíveis</h2>
+            <div class="search-bar">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="search-input" placeholder="Buscar canais...">
+                    <select id="filter-select" onchange="handleSearch()" style="padding: 8px; border-radius: 4px; border: 1px solid #30363d; background: #0a0e14; color: var(--text); font-weight: bold; cursor: pointer; transition: border-color 0.2s;">
+                        <option value="all">📺 Todos os Canais</option>
+                        <option value="18">🔞 Apenas +18</option>
+                        <option value="family">👶 Sem +18 (Livre)</option>
+                    </select>
+                </div>
+                <div>
+                    <button onclick="startAll()" style="background:#10b981; color:white; margin-right:10px;">▶ Iniciar Todos</button>
+                    <button onclick="stopAll()" style="background:#ef4444; color:white; margin-right:10px;">⏹ Parar Todos</button>
+                    <button onclick="downloadM3U()" style="background:#2563eb; color:white; margin-right:10px;">💾 Exportar M3U (Baixar)</button>
+                    <button onclick="copyM3ULink()" style="background:#6e7681; color:white; margin-right:10px;">🔗 Copiar Link M3U</button>
+                    <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th onclick="sortTable('id')">ID <span id="sort-icon-id"></span></th>
+                        <th onclick="sortTable('name')">Nome <span id="sort-icon-name"></span></th>
+                        <th onclick="sortTable('status')">Status <span id="sort-icon-status"></span></th>
+                        <th onclick="sortTable('uptime')">Uptime <span id="sort-icon-uptime"></span></th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody id="channels-table">
+                    <!-- Canais serão carregados aqui via JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- Aba: Segurança -->
+    <div id="tab-seguranca" class="tab-content">
+
+        <div class="channel-list">
+            <h2>🔒 Registro de Tentativas de Login</h2>
+            <div class="search-bar" style="justify-content: space-between;">
+                <div>
+                    <button onclick="loadLoginAttempts()" style="background:#2563eb; color:white;">🔄 Atualizar</button>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span style="color:#8b949e; font-size:0.9em;">IPs Bloqueados:</span>
+                    <span id="blocked-count" style="color:#ff4444; font-weight:bold;">0</span>
+                </div>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>Usuário</th>
+                            <th>Data/Hora</th>
+                            <th>Status</th>
+                            <th>User-Agent</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="login-attempts-table">
+                        <tr><td colspan="6" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="channel-list" style="margin-top:20px;">
+            <h2>🚫 IPs Bloqueados</h2>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blocked-ips-table">
+                        <tr><td colspan="2" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <!-- Modal para Criar Canal -->

@@ -48,6 +48,53 @@ const ADMINS = [
 // Gera um ID de sessão aleatório e seguro a cada inicialização do servidor
 const SESSION_ID = crypto.randomBytes(32).toString('hex');
 
+// Registro de tentativas de login para segurança
+const loginAttempts = [];
+const MAX_LOGIN_ATTEMPTS = 500;
+const BLOCKED_IPS_FILE = '/etc/nginx/blocked_ips.json';
+let blockedIPs = new Set();
+
+// Carrega IPs bloqueados do disco
+function loadBlockedIPs() {
+    try {
+        if (fs.existsSync(BLOCKED_IPS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(BLOCKED_IPS_FILE, 'utf8'));
+            blockedIPs = new Set(data);
+            console.log(`[SEGURANÇA] ${blockedIPs.size} IPs bloqueados carregados`);
+        }
+    } catch (e) {
+        console.error('[SEGURANÇA] Erro ao carregar IPs bloqueados:', e.message);
+    }
+}
+loadBlockedIPs();
+// Gera o arquivo de configuração do nginx na inicialização
+saveBlockedIPs();
+
+function saveBlockedIPs() {
+    try {
+        fs.writeFileSync(BLOCKED_IPS_FILE, JSON.stringify([...blockedIPs], null, 2));
+        // Gera conf do nginx
+        const conf = blockedIPs.size > 0
+            ? [...blockedIPs].map(ip => `deny ${ip};`).join('\n') + '\n'
+            : '# nenhum IP bloqueado\n';
+        fs.writeFileSync('/etc/nginx/blocked_ips.conf', conf);
+        execSync('nginx -s reload 2>/dev/null', { stdio: 'ignore' });
+    } catch (e) {
+        console.error('[SEGURANÇA] Erro ao salvar IPs bloqueados:', e.message);
+    }
+}
+
+function recordLoginAttempt(ip, user, success, userAgent) {
+    loginAttempts.unshift({
+        ip,
+        user: user || '(vazio)',
+        success,
+        userAgent: (userAgent || '').substring(0, 80),
+        timestamp: new Date().toISOString()
+    });
+    if (loginAttempts.length > MAX_LOGIN_ATTEMPTS) loginAttempts.pop();
+}
+
 const CHANNELS_DB_FILE = path.join(__dirname, 'channels.json');
 
 // Global array to hold channel configurations
@@ -591,8 +638,20 @@ const server = http.createServer(async (req, res) => {
     const cookies = getCookies(req);
     const isAuth = cookies['session_token'] === SESSION_ID;
 
+    // Helper para obter IP real do cliente (trata proxy reverso)
+    function getClientIP(req) {
+        const fwd = req.headers['x-forwarded-for'];
+        if (fwd) return fwd.split(',')[0].trim();
+        return req.socket?.remoteAddress || 'unknown';
+    }
+
     // Rota pública de login
     if (url.pathname === '/api/login' && req.method === 'POST') {
+        const clientIP = getClientIP(req);
+        if (blockedIPs.has(clientIP)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'error', message: 'IP bloqueado' }));
+        }
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
@@ -608,23 +667,21 @@ const server = http.createServer(async (req, res) => {
             }
             
             const cleanUser = user ? user.trim().toLowerCase() : '';
-            console.log(`[AUTH] Tentativa de login para: ${cleanUser}`);
-
             const adminFound = ADMINS.find(a => a.user.toLowerCase() === cleanUser);
-            
             const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
+            const success = !!(adminFound && isPasswordValid);
+            
+            recordLoginAttempt(clientIP, cleanUser, success, req.headers['user-agent']);
 
-            if (!adminFound) console.log(`[AUTH] Falha: Usuário ${cleanUser} não encontrado.`);
-            if (adminFound && !isPasswordValid) console.log(`[AUTH] Falha: Senha incorreta para ${cleanUser}.`);
-
-            if (adminFound && isPasswordValid) {
-                console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser}.`);
+            if (success) {
+                console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser} (${clientIP})`);
                 res.writeHead(200, { 
                     'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
                     'Content-Type': 'application/json' 
                 });
                 res.end(JSON.stringify({ status: 'success' }));
             } else {
+                console.log(`[AUTH] Falha: ${cleanUser || 'IP '+clientIP}`);
                 res.writeHead(401);
                 res.end(JSON.stringify({ status: 'error' }));
             }
@@ -1228,6 +1285,70 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'success', mode: 'vod' }));
             }
+        });
+        return;
+    }
+
+    // API: Listar tentativas de login
+    if (url.pathname === '/api/login-attempts' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(loginAttempts.slice(0, 200)));
+    }
+
+    // API: Listar IPs bloqueados
+    if (url.pathname === '/api/blocked-ips' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify([...blockedIPs]));
+    }
+
+    // API: Bloquear IP
+    if (url.pathname === '/api/block-ip' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const ip = data.ip;
+            if (!ip) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'IP não informado' }));
+            }
+            blockedIPs.add(ip);
+            saveBlockedIPs();
+            // Tenta bloquear via UFW também
+            try { execSync(`ufw deny from ${ip} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) {}
+            console.log(`[SEGURANÇA] IP ${ip} bloqueado`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'success', ip }));
+        });
+        return;
+    }
+
+    // API: Desbloquear IP
+    if (url.pathname === '/api/unblock-ip' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const ip = data.ip;
+            if (!ip) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'IP não informado' }));
+            }
+            blockedIPs.delete(ip);
+            saveBlockedIPs();
+            // Remove do UFW também
+            try { execSync(`ufw delete deny from ${ip} 2>/dev/null`, { stdio: 'ignore' }); } catch (e) {}
+            console.log(`[SEGURANÇA] IP ${ip} desbloqueado`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'success', ip }));
         });
         return;
     }

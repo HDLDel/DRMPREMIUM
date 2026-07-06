@@ -149,3 +149,45 @@ th:hover {
     /* display: flex; */ /* Removido para ser controlado via JS */
     /* ... outros estilos já no HTML inline ... */
 }
+
+/* Abas de navegação */
+.tab-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 30px;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    background: transparent;
+    color: #8b949e;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 0;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+
+.tab-btn:hover {
+    color: var(--text);
+    background: transparent;
+    opacity: 1;
+}
+
+.tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: transparent;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}

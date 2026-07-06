@@ -465,6 +465,107 @@ window.addEventListener('scroll', () => {
     }
 });
 
+// Alternar abas
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelector(`.tab-btn[onclick*="${tab}"]`).classList.add('active');
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    if (tab === 'seguranca') {
+        loadLoginAttempts();
+        loadBlockedIPs();
+    }
+}
+
+// Funções da aba Segurança
+async function loadLoginAttempts() {
+    const tbody = document.getElementById('login-attempts-table');
+    try {
+        const res = await fetch('/api/login-attempts');
+        const attempts = await res.json();
+        if (!attempts.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;">Nenhuma tentativa registrada ainda.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = attempts.map(a => `
+            <tr style="${a.success ? '' : 'background:rgba(255,68,68,0.08)'}">
+                <td><code>${a.ip}</code></td>
+                <td>${a.user}</td>
+                <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
+                <td>${a.success ? '<span style="color:#00ff99;font-weight:bold;">✅ Sucesso</span>' : '<span style="color:#ff4444;font-weight:bold;">❌ Falha</span>'}</td>
+                <td style="font-size:0.8em;color:#8b949e;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.userAgent}">${a.userAgent || '-'}</td>
+                <td>
+                    <button onclick="blockIP('${a.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#ff4444;">Erro ao carregar tentativas.</td></tr>';
+    }
+}
+
+async function loadBlockedIPs() {
+    const tbody = document.getElementById('blocked-ips-table');
+    const count = document.getElementById('blocked-count');
+    try {
+        const res = await fetch('/api/blocked-ips');
+        const ips = await res.json();
+        count.textContent = ips.length;
+        if (!ips.length) {
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#8b949e;">Nenhum IP bloqueado.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = ips.map(ip => `
+            <tr>
+                <td><code>${ip}</code></td>
+                <td>
+                    <button onclick="unblockIP('${ip}')" style="background:#10b981;color:white;padding:4px 8px;font-size:0.8em;">🔓 Desbloquear</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#ff4444;">Erro ao carregar IPs bloqueados.</td></tr>';
+    }
+}
+
+async function blockIP(ip) {
+    if (!confirm(`Bloquear o IP ${ip}?`)) return;
+    try {
+        const res = await fetch('/api/block-ip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        if (res.ok) {
+            loadLoginAttempts();
+            loadBlockedIPs();
+        } else {
+            alert('Erro ao bloquear IP');
+        }
+    } catch (e) {
+        alert('Erro ao bloquear IP');
+    }
+}
+
+async function unblockIP(ip) {
+    if (!confirm(`Desbloquear o IP ${ip}?`)) return;
+    try {
+        const res = await fetch('/api/unblock-ip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        if (res.ok) {
+            loadBlockedIPs();
+            loadLoginAttempts();
+        } else {
+            alert('Erro ao desbloquear IP');
+        }
+    } catch (e) {
+        alert('Erro ao desbloquear IP');
+    }
+}
+
 // Atualização automática dos gráficos de hardware
 setInterval(updateStats, 5000);
 setInterval(() => loadAndRenderChannels(document.getElementById('search-input').value), 10000);
