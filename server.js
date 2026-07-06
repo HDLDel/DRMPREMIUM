@@ -966,11 +966,15 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/startall' && req.method === 'POST') {
         const started = [];
-        for (const channel of channels) {
-            if (channel.status === 'offline' && !activeStreams.has(channel.id)) {
-                const result = await startChannel(channel.id);
+        const offlineChannels = channels.filter(c => c.status === 'offline' && !activeStreams.has(c.id));
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < offlineChannels.length; i += BATCH_SIZE) {
+            const batch = offlineChannels.slice(i, i + BATCH_SIZE);
+            console.log(`[STARTALL] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
+            const results = await Promise.all(batch.map(ch => startChannel(ch.id)));
+            for (const result of results) {
                 if (result.status === 'success') {
-                    started.push(channel.name);
+                    started.push(result.name || 'unknown');
                 }
             }
         }
