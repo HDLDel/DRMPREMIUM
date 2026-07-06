@@ -1295,6 +1295,21 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify(loginAttempts.slice(0, 200)));
     }
 
+    // API: Top IPs com mais tentativas (para detectar ataques)
+    if (url.pathname === '/api/top-attackers' && req.method === 'GET') {
+        const countMap = {};
+        loginAttempts.forEach(a => {
+            if (!countMap[a.ip]) countMap[a.ip] = { ip: a.ip, total: 0, fails: 0, successes: 0, lastAttempt: a.timestamp };
+            countMap[a.ip].total++;
+            if (a.success) countMap[a.ip].successes++;
+            else countMap[a.ip].fails++;
+            if (a.timestamp > countMap[a.ip].lastAttempt) countMap[a.ip].lastAttempt = a.timestamp;
+        });
+        const sorted = Object.values(countMap).sort((a, b) => b.total - a.total);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(sorted));
+    }
+
     // API: Listar IPs bloqueados
     if (url.pathname === '/api/blocked-ips' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json' });

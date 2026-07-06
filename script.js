@@ -474,6 +474,7 @@ function switchTab(tab) {
     if (tab === 'seguranca') {
         loadLoginAttempts();
         loadBlockedIPs();
+        loadTopAttackers();
     }
 }
 
@@ -528,6 +529,32 @@ async function loadBlockedIPs() {
     }
 }
 
+async function loadTopAttackers() {
+    const tbody = document.getElementById('top-attackers-table');
+    try {
+        const res = await fetch('/api/top-attackers');
+        const attackers = await res.json();
+        if (!attackers.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;">Nenhum dado ainda.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = attackers.map(a => `
+            <tr style="${a.fails >= a.total * 0.5 && a.total >= 3 ? 'background:rgba(255,68,68,0.12);' : ''}">
+                <td><code>${a.ip}</code></td>
+                <td style="font-weight:bold;">${a.total}</td>
+                <td style="color:${a.fails > 0 ? '#ff4444' : '#8b949e'};font-weight:bold;">${a.fails}</td>
+                <td style="color:#00ff99;">${a.successes}</td>
+                <td style="font-size:0.85em;">${new Date(a.lastAttempt).toLocaleString('pt-BR')}</td>
+                <td>
+                    <button onclick="blockIP('${a.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#ff4444;">Erro ao carregar.</td></tr>';
+    }
+}
+
 async function blockIP(ip) {
     if (!confirm(`Bloquear o IP ${ip}?`)) return;
     try {
@@ -539,6 +566,7 @@ async function blockIP(ip) {
         if (res.ok) {
             loadLoginAttempts();
             loadBlockedIPs();
+            loadTopAttackers();
         } else {
             alert('Erro ao bloquear IP');
         }
@@ -558,6 +586,7 @@ async function unblockIP(ip) {
         if (res.ok) {
             loadBlockedIPs();
             loadLoginAttempts();
+            loadTopAttackers();
         } else {
             alert('Erro ao desbloquear IP');
         }

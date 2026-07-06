@@ -128,6 +128,28 @@
         </div>
 
         <div class="channel-list" style="margin-top:20px;">
+            <h2>⚠️ Top IPs Suspeitos</h2>
+            <p style="color:#8b949e; font-size:0.85em; margin-top:-10px;">IPs com maior número de tentativas de login (ordenado por total decrescente)</p>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>Total</th>
+                            <th>❌ Falhas</th>
+                            <th>✅ Sucessos</th>
+                            <th>Última Tentativa</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="top-attackers-table">
+                        <tr><td colspan="6" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="channel-list" style="margin-top:20px;">
             <h2>🚫 IPs Bloqueados</h2>
             <div style="overflow-x:auto;">
                 <table>
