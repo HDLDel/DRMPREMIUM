@@ -166,6 +166,37 @@
             </div>
         </div>
 
+        <div class="channel-list" style="margin-top:20px;">
+            <h2>📡 Acessos aos Canais</h2>
+            <div class="search-bar" style="justify-content: space-between;">
+                <div>
+                    <button onclick="loadNginxAccess()" style="background:#2563eb; color:white;">🔄 Atualizar</button>
+                </div>
+                <div style="display:flex; gap:15px; align-items:center;">
+                    <span style="color:#8b949e; font-size:0.9em;">🔌 IPs Únicos:</span>
+                    <span id="access-unique-ips" style="color:#58a6ff; font-weight:bold;">0</span>
+                    <span style="color:#8b949e; font-size:0.9em;">📥 Total Requests:</span>
+                    <span id="access-total-requests" style="color:#58a6ff; font-weight:bold;">0</span>
+                </div>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP</th>
+                            <th>Canais Acessados</th>
+                            <th>Hits</th>
+                            <th>Último Acesso</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nginx-access-table">
+                        <tr><td colspan="5" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
 
     <!-- Modal para Criar Canal -->

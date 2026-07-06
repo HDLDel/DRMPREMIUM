@@ -95,6 +95,58 @@ function recordLoginAttempt(ip, user, success, userAgent) {
     if (loginAttempts.length > MAX_LOGIN_ATTEMPTS) loginAttempts.pop();
 }
 
+// Monitor de acessos via nginx access log
+const NGINX_ACCESS_LOG = '/var/log/nginx/iptv_access.log';
+let nginxAccessData = new Map();
+let nginxLogOffset = 0;
+
+function parseNginxAccessLog() {
+    try {
+        if (!fs.existsSync(NGINX_ACCESS_LOG)) return;
+        const stats = fs.statSync(NGINX_ACCESS_LOG);
+        if (stats.size < nginxLogOffset) nginxLogOffset = 0;
+        if (stats.size === nginxLogOffset) return;
+        // Na primeira execução, pula todo o histórico existente (comportamento tail -f)
+        if (nginxLogOffset === 0) {
+            nginxLogOffset = stats.size;
+            return;
+        }
+        const fd = fs.openSync(NGINX_ACCESS_LOG, 'r');
+        const buffer = Buffer.alloc(stats.size - nginxLogOffset);
+        fs.readSync(fd, buffer, 0, buffer.length, nginxLogOffset);
+        fs.closeSync(fd);
+        nginxLogOffset = stats.size;
+        const lines = buffer.toString('utf8').split('\n');
+        const now = Date.now();
+        const MAX_AGE = 60 * 60 * 1000;
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const match = line.match(/^(\S+).*"GET \/canais\/(\d+)\/[^"]*"\s+(\d+)/);
+            if (!match) continue;
+            const ip = match[1];
+            const channelId = match[2];
+            const status = match[3];
+            if (status !== '200') continue;
+            if (!nginxAccessData.has(ip)) {
+                nginxAccessData.set(ip, { channels: {}, totalHits: 0, firstSeen: now, lastSeen: now });
+            }
+            const entry = nginxAccessData.get(ip);
+            if (!entry.channels[channelId]) {
+                entry.channels[channelId] = { hits: 0, lastAccess: now };
+            }
+            entry.channels[channelId].hits++;
+            entry.channels[channelId].lastAccess = now;
+            entry.totalHits++;
+            entry.lastSeen = now;
+        }
+        for (const [ip, data] of nginxAccessData) {
+            if (now - data.lastSeen > MAX_AGE) nginxAccessData.delete(ip);
+        }
+    } catch (e) {
+        console.error('[NGINX LOG] Erro ao ler access log:', e.message);
+    }
+}
+
 const CHANNELS_DB_FILE = path.join(__dirname, 'channels.json');
 
 // Global array to hold channel configurations
@@ -1368,6 +1420,43 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // API: Acessos aos canais via nginx log
+    if (url.pathname === '/api/nginx-access' && req.method === 'GET') {
+        const data = [];
+        for (const [ip, entry] of nginxAccessData) {
+            const channels = Object.entries(entry.channels).map(([id, info]) => ({
+                id: parseInt(id),
+                hits: info.hits,
+                lastAccess: info.lastAccess
+            }));
+            channels.sort((a, b) => b.hits - a.hits);
+            data.push({ ip, channels, totalHits: entry.totalHits, firstSeen: entry.firstSeen, lastSeen: entry.lastSeen });
+        }
+        data.sort((a, b) => b.totalHits - a.totalHits);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(data));
+    }
+
+    // API: Stats resumidos de acesso
+    if (url.pathname === '/api/nginx-access/stats' && req.method === 'GET') {
+        let totalIPs = 0, totalRequests = 0;
+        const channelStats = {};
+        for (const [ip, entry] of nginxAccessData) {
+            totalIPs++;
+            totalRequests += entry.totalHits;
+            for (const [id, info] of Object.entries(entry.channels)) {
+                if (!channelStats[id]) channelStats[id] = 0;
+                channelStats[id] += info.hits;
+            }
+        }
+        const topChannels = Object.entries(channelStats)
+            .map(([id, hits]) => ({ id: parseInt(id), hits }))
+            .sort((a, b) => b.hits - a.hits)
+            .slice(0, 5);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ totalIPs, totalRequests, topChannels }));
+    }
+
     // Servir Arquivos Estáticos (Dashboard)
     let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
     
@@ -1490,6 +1579,10 @@ setInterval(() => {
     }
     if (removed > 0) console.log(`[LIMPEZA tmpfs] ${removed} segmentos órfãos removidos`);
 }, 30 * 60 * 1000);
+
+// Parse do nginx access log a cada 30s para monitor de acessos
+setInterval(parseNginxAccessLog, 30000);
+setTimeout(parseNginxAccessLog, 5000);
 
  // Limpa segmentos HLS antigos no tmpfs para evitar acúmulo entre restart
  function cleanTmpfsSegments() {

@@ -34,7 +34,11 @@ sudo nginx -t
 # ALERTA EM CAIXA ALTA: ESTE COMANDO REINICIARÁ O SERVIÇO NGINX PARA APLICAR AS NOVAS CONFIGURAÇÕES.
 sudo systemctl restart nginx
 
-# 7. Mensagem final
+# 7. Aplicar ajustes de desempenho do sistema
+echo "Aplicando ajustes de desempenho..."
+bash ajuste.sh
+
+# 8. Mensagem final
 echo "-------------------------------------------------------"
 echo "Instalação concluída!"
 echo "O Nginx foi configurado e reiniciado."

@@ -475,6 +475,7 @@ function switchTab(tab) {
         loadLoginAttempts();
         loadBlockedIPs();
         loadTopAttackers();
+        loadNginxAccess();
     }
 }
 
@@ -554,6 +555,50 @@ async function loadTopAttackers() {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#ff4444;">Erro ao carregar.</td></tr>';
     }
 }
+
+async function loadNginxAccess() {
+    const tbody = document.getElementById('nginx-access-table');
+    try {
+        const [accessRes, statsRes] = await Promise.all([
+            fetch('/api/nginx-access'),
+            fetch('/api/nginx-access/stats')
+        ]);
+        const accessData = await accessRes.json();
+        const statsData = await statsRes.json();
+
+        document.getElementById('access-unique-ips').textContent = statsData.totalIPs;
+        document.getElementById('access-total-requests').textContent = statsData.totalRequests;
+
+        if (!accessData.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;">Nenhum acesso registrado nos últimos 60 minutos.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = accessData.slice(0, 100).map(entry => {
+            const channelsStr = entry.channels.slice(0, 5).map(ch =>
+                `<span style="display:inline-block;background:#1f242c;padding:2px 6px;border-radius:4px;margin:2px;font-size:0.8em;">#${ch.id} (${ch.hits})</span>`
+            ).join('');
+            const more = entry.channels.length > 5 ? ` <span style="color:#8b949e;font-size:0.8em;">+${entry.channels.length - 5}</span>` : '';
+            return `<tr>
+                <td><code>${entry.ip}</code></td>
+                <td>${channelsStr}${more}</td>
+                <td style="font-weight:bold;">${entry.totalHits}</td>
+                <td style="font-size:0.85em;">${new Date(entry.lastSeen).toLocaleString('pt-BR')}</td>
+                <td><button onclick="blockIP('${entry.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button></td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ff4444;">Erro ao carregar dados de acesso.</td></tr>';
+    }
+}
+
+// Auto-refresh dos acessos a cada 15s
+setInterval(async () => {
+    const segurancaTab = document.getElementById('tab-seguranca');
+    if (segurancaTab && segurancaTab.classList.contains('active')) {
+        await loadNginxAccess();
+    }
+}, 15000);
 
 async function blockIP(ip) {
     if (!confirm(`Bloquear o IP ${ip}?`)) return;
