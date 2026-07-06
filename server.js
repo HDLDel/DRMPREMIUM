@@ -1270,12 +1270,16 @@ setInterval(() => {
 server.listen(PORT, async () => {
     await loadChannels(); // Load channels on startup
     
-    // Auto-start: Verifica canais que deveriam estar online e inicia o FFmpeg
-    for (const channel of channels) {
-        if (channel.status === 'online') {
-            console.log(`[AUTO-START] Reiniciando transmissão do canal: ${channel.name}`);
-            await startChannel(channel.id);
-        }
+    // Auto-start: inicia canais em lotes de 5 paralelamente
+    const onlineChannels = channels.filter(c => c.status === 'online');
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < onlineChannels.length; i += BATCH_SIZE) {
+        const batch = onlineChannels.slice(i, i + BATCH_SIZE);
+        console.log(`[AUTO-START] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
+        await Promise.all(batch.map(ch => {
+            console.log(`[AUTO-START] Reiniciando transmissão do canal: ${ch.name}`);
+            return startChannel(ch.id);
+        }));
     }
     // Cria flag files para canais em modo VOD (nginx check)
     for (const channel of channels) {
