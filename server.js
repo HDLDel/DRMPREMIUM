@@ -6,6 +6,14 @@ const os = require('os');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
+// Previne crash do Node.js em erros não tratados (JSON inválido externo, etc)
+process.on('uncaughtException', (err) => {
+    console.error('[UNCAUGHT EXCEPTION]', err.message);
+});
+process.on('unhandledRejection', (err) => {
+    console.error('[UNHANDLED REJECTION]', err?.message || err);
+});
+
 const PORT = 8080;
 
 // No Linux Ubuntu, usamos obrigatoriamente o RAM Disk (/dev/shm) para os segmentos HLS
@@ -22,7 +30,14 @@ if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
 
 const NGINX_LOG = '/var/log/nginx/iptv_access.log';
 
-const FFMPEG_PATH = 'ffmpeg'; 
+const FFMPEG_PATH = 'ffmpeg';
+const NOCACHE = '/usr/bin/nocache';
+function spawnFFmpeg(args) {
+    if (fs.existsSync(NOCACHE)) {
+        return spawn(NOCACHE, [FFMPEG_PATH, ...args]);
+    }
+    return spawn(FFMPEG_PATH, args);
+}
 
 // Lista de Administradores com hashes seguros (bcrypt)
 const ADMINS = [
@@ -502,7 +517,7 @@ async function startChannel(id) {
         path.join(outputDir, 'index.m3u8')
     );
 
-    const ffmpeg = spawn(FFMPEG_PATH, args);
+    const ffmpeg = spawnFFmpeg(args);
 
     // Prepara o stream de log para este canal
     const logStream = fs.createWriteStream(path.join(LOGS_DIR, `canal_${id}.log`), { flags: 'a' });
@@ -581,7 +596,16 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
-            const { user, pass } = JSON.parse(body);
+            let user, pass;
+            try {
+                const parsed = JSON.parse(body);
+                user = parsed.user;
+                pass = parsed.pass;
+            } catch (e) {
+                console.error(`[ERRO JSON] Login com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
             
             const cleanUser = user ? user.trim().toLowerCase() : '';
             console.log(`[AUTH] Tentativa de login para: ${cleanUser}`);
@@ -642,7 +666,12 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
-            const data = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] toggle18 com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
             const id = Number(data.id);
             const channel = channels.find(c => c.id === id);
             if (channel) {
@@ -692,7 +721,12 @@ const server = http.createServer(async (req, res) => {
         let body = ''; // Removed canalNome from startChannel call
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
-            const data = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] start com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
             const result = await startChannel(Number(data.id)); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
@@ -910,7 +944,12 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
-            const data = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] delete com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
             const id = Number(data.id);
 
             // 1. Segurança: Não permite excluir se estiver rodando
@@ -948,7 +987,12 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
-            const data = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] stop com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
             const id = Number(data.id);
             
             const channel = channels.find(c => c.id === id);
@@ -1008,7 +1052,13 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
-            const { id } = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] convert com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const { id } = data;
             const channel = channels.find(c => c.id === id);
             if (!channel) {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1032,7 +1082,7 @@ const server = http.createServer(async (req, res) => {
                 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
                 console.log(`[CONVERT] Convertendo canal ${id} (${channel.name}) para VOD...`);
-                const proc = spawn(FFMPEG_PATH, [
+                const proc = spawnFFmpeg([
                     '-fflags', '+genpts+igndts+flush_packets',
                     '-err_detect', 'ignore_err',
                     '-f', 'concat', '-safe', '0',
@@ -1087,7 +1137,13 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
-            const { id } = JSON.parse(body);
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                console.error(`[ERRO JSON] toggle-vod com JSON inválido: ${e.message}`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const { id } = data;
             const channel = channels.find(c => c.id === id);
             if (!channel) {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -1125,7 +1181,7 @@ const server = http.createServer(async (req, res) => {
                         }
                     });
                     console.log(`[TOGGLE] Convertendo canal ${id} para VOD...`);
-                    const proc = spawn(FFMPEG_PATH, [
+                    const proc = spawnFFmpeg([
                         '-fflags', '+genpts+igndts+flush_packets',
                         '-err_detect', 'ignore_err',
                         '-f', 'concat', '-safe', '0',
@@ -1271,8 +1327,77 @@ setInterval(() => {
     });
 }, 12 * 60 * 60 * 1000);
 
-server.listen(PORT, async () => {
-    await loadChannels(); // Load channels on startup
+/**
+ * Rotina de Limpeza do tmpfs (a cada 30 min) - remove segmentos órfãos
+ */
+setInterval(() => {
+    const channelsDir = path.join(CHANNELS_DIR);
+    if (!fs.existsSync(channelsDir)) return;
+    const dirs = fs.readdirSync(channelsDir);
+    let removed = 0;
+    for (const d of dirs) {
+        const dirPath = path.join(channelsDir, d);
+        try {
+            const files = fs.readdirSync(dirPath);
+            // Só limpa se houver mais que 15 segments (hls_list_size=10 + margem)
+            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            if (tsFiles.length > 15) {
+                // Ordena por nome (segmento mais antigo = menor número)
+                const sorted = tsFiles.sort();
+                const toDelete = sorted.slice(0, sorted.length - 10);
+                for (const f of toDelete) {
+                    fs.unlinkSync(path.join(dirPath, f));
+                    removed++;
+                }
+            }
+        } catch (e) {}
+    }
+    if (removed > 0) console.log(`[LIMPEZA tmpfs] ${removed} segmentos órfãos removidos`);
+}, 30 * 60 * 1000);
+
+ // Limpa segmentos HLS antigos no tmpfs para evitar acúmulo entre restart
+ function cleanTmpfsSegments() {
+     const channelsDir = path.join(CHANNELS_DIR);
+     if (!fs.existsSync(channelsDir)) return;
+     const dirs = fs.readdirSync(channelsDir);
+     let removed = 0;
+     for (const d of dirs) {
+         const dirPath = path.join(channelsDir, d);
+         try {
+             const files = fs.readdirSync(dirPath);
+             for (const f of files) {
+                 if (f.endsWith('.ts') || f === 'index.m3u8') {
+                     fs.unlinkSync(path.join(dirPath, f));
+                     removed++;
+                 }
+             }
+         } catch (e) {}
+     }
+     console.log(`[LIMPEZA] ${removed} segmentos HLS antigos removidos do tmpfs`);
+ }
+
+ // Mata ffmpeg órfãos de execuções anteriores
+ function killOrphanFFmpeg() {
+     try {
+         const result = execSync('pkill -x ffmpeg 2>/dev/null; echo done').toString();
+         console.log('[STARTUP] ffmpeg órfãos finalizados');
+     } catch (e) {}
+ }
+
+ server.listen(PORT, async () => {
+     await loadChannels(); // Load channels on startup
+     killOrphanFFmpeg();
+     cleanTmpfsSegments();
+     
+     // Reseta todos os canais para online (exceto VOD) para que subam todos no auto-start
+    let resetCount = 0;
+    for (const ch of channels) {
+        if (ch.status !== 'vod') {
+            ch.status = 'online';
+            resetCount++;
+        }
+    }
+    console.log(`[STARTUP] ${resetCount} canais resetados para online`);
     
     // Auto-start: inicia canais em lotes de 5 paralelamente
     const onlineChannels = channels.filter(c => c.status === 'online');
