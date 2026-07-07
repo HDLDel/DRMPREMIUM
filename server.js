@@ -770,32 +770,6 @@ const server = http.createServer(async (req, res) => {
         return res.end(m3uContent);
     }
 
-    // API: Alternar status +18 de um canal
-    if (url.pathname === '/api/toggle18' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', async () => {
-            let data;
-            try { data = JSON.parse(body); } catch (e) {
-                console.error(`[ERRO JSON] toggle18 com JSON inválido: ${e.message}`);
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
-            }
-            const id = Number(data.id);
-            const channel = channels.find(c => c.id === id);
-            if (channel) {
-                channel.is18 = !channel.is18;
-                await saveChannels();
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'success', is18: channel.is18 }));
-            } else {
-                res.writeHead(404);
-                res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
-            }
-        });
-        return;
-    }
-
     // Redireciona para login se não estiver autenticado
     if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
         res.writeHead(302, { 'Location': '/login.html' });
@@ -869,6 +843,31 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ error: "Falha ao ler pastas" }));
         }
+    }
+
+    // API: Alternar status +18 de um canal
+    if (url.pathname === '/api/toggle18' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const id = Number(data.id);
+            const channel = channels.find(c => c.id === id);
+            if (channel) {
+                channel.is18 = !channel.is18;
+                await saveChannels();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'success', is18: channel.is18 }));
+            } else {
+                res.writeHead(404);
+                res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
+            }
+        });
+        return;
     }
 
     // API: Criar canal escaneando a pasta selecionada
