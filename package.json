@@ -4,7 +4,8 @@
   "description": "Sistema de Gerenciamento de Canais HLS em Node.js",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "obfuscate": "python3 build-obfuscated.py"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3"
