@@ -61,3 +61,6 @@ gemini-tools.md
 .gemini-agent.md
 .aiexclude
 deploy.py
+
+# Build output
+DRMPREMIUM/
