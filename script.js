@@ -202,7 +202,13 @@ async function loadAndRenderChannels(filter = '') {
             nameCell.innerHTML = nameHTML;
             
             const statusCell = row.insertCell();
-            statusCell.innerHTML = `<span style="color: ${channel.status === 'online' ? '#00ff99' : '#ff4444'}">${channel.status.toUpperCase()}</span>`;
+            let statusColor = '#ff4444'; // padrão offline
+            if (channel.status === 'online') {
+                statusColor = '#00ff99';
+            } else if (channel.status === 'vod') {
+                statusColor = '#60a5fa';
+            }
+            statusCell.innerHTML = `<span style="color: ${statusColor}">${channel.status.toUpperCase()}</span>`;
             
             row.insertCell().innerText = channel.status === 'online' ? formatUptime(channel.uptime) : '-';
             const actionsCell = row.insertCell();
@@ -215,9 +221,18 @@ async function loadAndRenderChannels(filter = '') {
                     <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
                     <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
                 `;
-            } else {
+            } else if (channel.status === 'vod') {
+                actionsCell.innerHTML = `
+                    <button onclick="toggleVod(${channel.id})" style="background:#8b5cf6; color:white;" title="Alternar para Live">🔄 Live</button>
+                    <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
+                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
+                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
+                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
+                `;
+            } else { // online
                 actionsCell.innerHTML = `
                     <button class="stop" onclick="stop(${channel.id})" title="Parar">⏹ Parar</button>
+                    <button onclick="toggleVod(${channel.id})" style="background:#8b5cf6; color:white;" title="Alternar para VOD">🔄 VOD</button>
                     <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
                     <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
                     <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
@@ -707,5 +722,39 @@ async function stopAll() {
         }
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
+    }
+}
+
+async function toggleVod(id) {
+    const channel = allChannels.find(c => c.id === id);
+    if (!channel) return;
+    
+    let confirmMsg = '';
+    if (channel.status === 'vod') {
+        confirmMsg = `Alternar canal ${id} ("${channel.name}") de volta para LIVE? O FFmpeg será reiniciado.`;
+    } else {
+        confirmMsg = `Alternar canal ${id} ("${channel.name}") para modo VOD?\nSe os arquivos de vídeo ainda não foram convertidos, isso iniciará a conversão (pode levar alguns minutos).`;
+    }
+    
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        const res = await fetch('/api/toggle-vod', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            alert(`Canal ${id} alternado para modo ${data.mode.toUpperCase()} com sucesso!`);
+            updateStats();
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        } else {
+            alert(`Erro: ${data.message || 'Falha ao alternar modo VOD'}`);
+        }
+    } catch (err) {
+        console.error('Erro ao alternar VOD:', err);
+        alert('Erro ao tentar alternar o modo VOD.');
     }
 }
