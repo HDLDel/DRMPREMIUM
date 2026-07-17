@@ -41,8 +41,12 @@ echo 'tcp_bbr' > /etc/modules-load.d/bbr.conf
 echo "  → /etc/modules-load.d/bbr.conf criado"
 
 # ─── Ring buffer da NIC ───
-ethtool -G eno1 rx 8192 tx 8192
-echo "  → Ring buffer eno1: RX=8192 TX=8192"
+if ethtool eno1 >/dev/null 2>&1; then
+  ethtool -G eno1 rx 8192 tx 8192
+  echo "  → Ring buffer eno1: RX=8192 TX=8192"
+else
+  echo "  → NIC eno1 não encontrada, ring buffer ignorado"
+fi
 
 # ─── Swap off ───
 swapoff -a 2>/dev/null || true
