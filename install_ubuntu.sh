@@ -43,10 +43,13 @@ systemctl restart nginx
 echo "Aplicando ajustes de desempenho..."
 bash ajuste.sh
 
-# 8. Mensagem final
+# 8. Iniciar aplicação com PM2
+pm2 start server.js --name iptv-pro
+pm2 save
+pm2 startup
+
+# 9. Mensagem final
 echo "-------------------------------------------------------"
 echo "Instalação concluída!"
-echo "O Nginx foi configurado e reiniciado."
-echo "Para iniciar o servidor Node.js: pm2 start server.js --name iptv-pro"
-echo "Para salvar a configuração do PM2 para iniciar automaticamente: pm2 save"
+echo "O sistema já está online."
 echo "-------------------------------------------------------"
