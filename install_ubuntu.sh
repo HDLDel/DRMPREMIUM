@@ -185,9 +185,9 @@ echo "=== Ajustes de desempenho aplicados ==="
 # ═══════════════════════════════════════════════
 
 echo "=== Iniciando aplicação com PM2 ==="
-pm2 delete iptv-pro 2>/dev/null || true
+pm2 delete 24horas 2>/dev/null || true
 cd "$PROJDIR"
-pm2 start server.js --name iptv-pro
+pm2 start server.js --name 24horas
 pm2 save
 pm2 startup systemd -u root --hp /root 2>/dev/null || true
 
