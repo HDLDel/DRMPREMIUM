@@ -50,8 +50,27 @@ async function updateStats() {
                 });
             }
         }
+        // Cache status
+        const cacheEl = document.getElementById('cache-status');
+        if (data.nocache !== undefined) {
+            cacheEl.innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
+            cacheEl.style.color = data.nocache ? '#ff4444' : '#00ff99';
+            const card = document.getElementById('cache-card');
+            card.title = data.nocache ? 'Clique para ativar cache (recomendado)' : 'Clique para desativar cache (libera RAM)';
+        }
     } catch (err) {
         console.error('Erro ao buscar telemetria:', err);
+    }
+}
+
+async function toggleNocache() {
+    try {
+        const res = await fetch('/api/toggle-nocache', { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('cache-status').innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
+        document.getElementById('cache-status').style.color = data.nocache ? '#ff4444' : '#00ff99';
+    } catch (err) {
+        console.error('Erro ao alternar cache:', err);
     }
 }
 

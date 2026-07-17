@@ -32,8 +32,10 @@ const NGINX_LOG = '/var/log/nginx/iptv_access.log';
 
 const FFMPEG_PATH = 'ffmpeg';
 const NOCACHE = '/usr/bin/nocache';
+const NOCACHE_FLAG = path.join(__dirname, '.nocache');
+let nocacheEnabled = fs.existsSync(NOCACHE_FLAG);
 function spawnFFmpeg(args) {
-    if (fs.existsSync(NOCACHE)) {
+    if (nocacheEnabled && fs.existsSync(NOCACHE)) {
         return spawn(NOCACHE, [FFMPEG_PATH, ...args]);
     }
     return spawn(FFMPEG_PATH, args);
@@ -499,7 +501,8 @@ async function getSystemStats() {
         rede: rede,
         uptime: Math.floor(os.uptime()),
         activeStreams: activeStreams.size,
-        disks: disksInfo
+        disks: disksInfo,
+        nocache: nocacheEnabled
     };
 }
 
@@ -1132,6 +1135,23 @@ const server = http.createServer(async (req, res) => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ status: 'success', started }));
+    }
+
+    if (url.pathname === '/api/nocache-status') {
+        return res.end(JSON.stringify({ nocache: nocacheEnabled }));
+    }
+
+    if (url.pathname === '/api/toggle-nocache' && req.method === 'POST') {
+        nocacheEnabled = !nocacheEnabled;
+        if (nocacheEnabled) {
+            fs.writeFileSync(NOCACHE_FLAG, '');
+            console.log('[NOCACHE] Cache de disco DESLIGADO (nocache ativado)');
+        } else {
+            try { fs.unlinkSync(NOCACHE_FLAG); } catch (e) {}
+            console.log('[NOCACHE] Cache de disco LIGADO (nocache desativado)');
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ nocache: nocacheEnabled }));
     }
 
     if (url.pathname === '/api/stopall' && req.method === 'POST') {

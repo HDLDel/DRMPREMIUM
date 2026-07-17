@@ -1,38 +1,43 @@
 #!/bin/bash
 
+if [ "$EUID" -ne 0 ]; then
+  echo "Este script precisa ser executado como root. Reexecutando com sudo..."
+  exec sudo bash "$0" "$@"
+fi
+
+set -e
+
 # 1. Atualizar repositórios
-sudo apt update && sudo apt upgrade -y
+apt update && apt upgrade -y
 
 # 2. Instalar dependências básicas e FFmpeg
-sudo apt install -y curl ffmpeg nginx git
+apt install -y curl ffmpeg nginx git
 
 # 3. Instalar Node.js 20 (LTS) via NodeSource
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs
 
 # 4. Instalar dependências do projeto e PM2
 npm install
-sudo npm install -g pm2
+npm install -g pm2
 
 # 5. Criar pastas necessárias com permissões corretas
 mkdir -p canais 24HORAS
-sudo chown -R $USER:$USER .
+chown -R $SUDO_USER:$SUDO_USER .
 
 # 6. Configurar Nginx
-# ALERTA EM CAIXA ALTA: ESTE COMANDO COPIARÁ O ARQUIVO DE CONFIGURAÇÃO DO NGINX.
-sudo cp nginx_iptv.conf /etc/nginx/sites-available/
+cp nginx_iptv.conf /etc/nginx/sites-available/
+ln -sf /etc/nginx/sites-available/nginx_iptv.conf /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
 
-# ALERTA EM CAIXA ALTA: ESTE COMANDO CRIARÁ UM LINK SIMBÓLICO PARA HABILITAR A CONFIGURAÇÃO DO NGINX.
-sudo ln -sf /etc/nginx/sites-available/nginx_iptv.conf /etc/nginx/sites-enabled/
+# Criar arquivo de bloqueio de IPs se não existir
+if [ ! -f /etc/nginx/blocked_ips.conf ]; then
+  touch /etc/nginx/blocked_ips.conf
+  echo "Arquivo /etc/nginx/blocked_ips.conf criado."
+fi
 
-# ALERTA EM CAIXA ALTA: ESTE COMANDO REMOVERÁ A CONFIGURAÇÃO PADRÃO DO NGINX.
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# ALERTA EM CAIXA ALTA: ESTE COMANDO TESTARÁ A SINTAXE DA CONFIGURAÇÃO DO NGINX.
-sudo nginx -t
-
-# ALERTA EM CAIXA ALTA: ESTE COMANDO REINICIARÁ O SERVIÇO NGINX PARA APLICAR AS NOVAS CONFIGURAÇÕES.
-sudo systemctl restart nginx
+nginx -t
+systemctl restart nginx
 
 # 7. Aplicar ajustes de desempenho do sistema
 echo "Aplicando ajustes de desempenho..."
