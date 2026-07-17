@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^5.4.7"
   }
 }

@@ -9,10 +9,11 @@ SRC = os.getcwd()
 PROJECT = os.path.basename(SRC)
 DST = os.path.join(SRC, PROJECT)
 
-OBFUSCATE = ['server.js']
+OBFUSCATE = ['server.js', 'script.js']
+
+MINIFY = ['index.html', 'login.html', 'style.css']
 
 STATIC = [
-    'index.html', 'login.html', 'script.js', 'style.css',
     'package.json', 'package-lock.json',
     'channels.json', 'nginx_iptv.conf',
     'readme.md', 'README.md',
@@ -63,7 +64,7 @@ def log(msg):
     print(f'[BUILD] {msg}')
 
 def check_tool(name):
-    if not shutil.which(name):
+    if not shutil.which(name) and not shutil.which('npx'):
         log(f'ERROR: {name} not found. Install: npm install -g {name}')
         sys.exit(1)
 
@@ -109,6 +110,11 @@ SESSION_SECRET=
 
 def obfuscate_files():
     obfuscator = shutil.which('javascript-obfuscator')
+    use_npx = False
+    if not obfuscator:
+        obfuscator = shutil.which('npx')
+        use_npx = True
+    
     for f in OBFUSCATE:
         src = os.path.join(SRC, f)
         dst = os.path.join(DST, f)
@@ -116,12 +122,68 @@ def obfuscate_files():
             log(f'SKIP (not found): {f}')
             continue
         log(f'Obfuscating: {f}...')
-        cmd = [obfuscator, src, '--output', dst] + OPS
+        
+        # Adjust options dynamically depending on file target
+        ops = OPS.copy()
+        if f == 'script.js':
+            try:
+                target_idx = ops.index('--target')
+                ops[target_idx + 1] = 'browser'
+            except ValueError:
+                pass
+                
+        if use_npx:
+            cmd = [obfuscator, 'javascript-obfuscator', src, '--output', dst] + ops
+        else:
+            cmd = [obfuscator, src, '--output', dst] + ops
+            
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             log(f'FAILED: {f}')
             log(r.stderr)
             sys.exit(1)
+
+import re
+
+def minify_css(content):
+    # Remove CSS comments
+    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+    # Remove excessive whitespaces
+    content = re.sub(r'\s+', ' ', content)
+    # Remove spaces around selectors and braces
+    content = re.sub(r'\s*([\{\}:;,])\s*', r'\1', content)
+    return content.strip()
+
+def minify_html(content):
+    # Remove HTML comments
+    content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
+    # Remove excessive whitespaces
+    content = re.sub(r'\s+', ' ', content)
+    # Remove spaces between tags
+    content = re.sub(r'>\s+<', '><', content)
+    return content.strip()
+
+def minify_files():
+    for f in MINIFY:
+        src = os.path.join(SRC, f)
+        dst = os.path.join(DST, f)
+        if not os.path.exists(src):
+            log(f'SKIP (not found): {f}')
+            continue
+        log(f'Minifying/Obfuscating: {f}...')
+        with open(src, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        ext = os.path.splitext(f)[1]
+        if ext == '.css':
+            minified = minify_css(content)
+        elif ext == '.html':
+            minified = minify_html(content)
+        else:
+            minified = content
+            
+        with open(dst, 'w', encoding='utf-8') as file:
+            file.write(minified)
 
 def main():
     check_tool('javascript-obfuscator')
@@ -137,6 +199,7 @@ def main():
     copy_dirs()
     create_env_example()
     obfuscate_files()
+    minify_files()
 
     log('')
     log('=' * 50)
