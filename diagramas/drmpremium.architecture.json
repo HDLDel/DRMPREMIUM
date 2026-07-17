@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "DRMPREMIUM — Arquitetura do Sistema",
+    "subtitle": "Infraestrutura de Streaming HLS na VPS Ubuntu",
+    "output": "drmpremium-architecture.html",
+    "viewBox": [1100, 820]
+  },
+  "components": [
+    { "id": "users", "type": "external", "label": "Usuários", "sublabel": "Browser / VLC / IPTV", "pos": [40, 180], "size": [130, 64] },
+    { "id": "dns", "type": "cloud", "label": "DNS / Domínio", "sublabel": "Porta 80", "pos": [210, 180], "size": [130, 64] },
+    { "id": "nginx", "type": "frontend", "label": "Nginx Reverse Proxy", "sublabel": "Porta 80 → 8080", "pos": [380, 180], "size": [160, 64] },
+    { "id": "serverjs", "type": "backend", "label": "Node.js (server.js)", "sublabel": "Porta 8080", "pos": [580, 180], "size": [150, 64] },
+    { "id": "admin", "type": "external", "label": "Administrador", "sublabel": "Dashboard Web", "pos": [770, 180], "size": [130, 64] },
+    { "id": "blocked", "type": "security", "label": "Bloqueio IPs", "sublabel": "blocked_ips.conf/.json", "pos": [40, 320], "size": [140, 60] },
+    { "id": "logs", "type": "security", "label": "Logs + Monitor", "sublabel": "Nginx + FFmpeg + Sys", "pos": [210, 320], "size": [150, 60] },
+    { "id": "nginxcache", "type": "cloud", "label": "Nginx Serve HLS", "sublabel": "Alias /canais/{id}/", "pos": [400, 320], "size": [160, 60] },
+    { "id": "ffmpeg", "type": "backend", "label": "FFmpeg (x535)", "sublabel": "Transcodificação HLS", "pos": [590, 320], "size": [150, 60] },
+    { "id": "videosource", "type": "database", "label": "24HORAS/ (HD)", "sublabel": "Arquivos MP4", "pos": [40, 460], "size": [140, 64] },
+    { "id": "channelsdb", "type": "database", "label": "channels.json", "sublabel": "Configuração canais", "pos": [210, 460], "size": [140, 64] },
+    { "id": "ramdisk", "type": "database", "label": "/dev/shm (RAM)", "sublabel": "Segmentos .ts + .m3u8", "pos": [590, 460], "size": [150, 64] }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "VPS Ubuntu — 1.0.0.1",
+      "wraps": ["nginx", "serverjs", "ffmpeg", "ramdisk", "nginxcache", "logs", "blocked", "channelsdb", "videosource"]
+    }
+  ],
+  "connections": [
+    { "from": "users", "to": "dns", "variant": "emphasis", "label": "HTTP GET", "labelDy": 56 },
+    { "from": "dns", "to": "nginx", "variant": "emphasis" },
+    { "from": "nginx", "to": "serverjs", "variant": "emphasis", "label": "proxy_pass :8080", "labelDy": 56 },
+    { "from": "serverjs", "to": "ffmpeg", "variant": "emphasis", "label": "spawn()", "fromSide": "bottom", "toSide": "top", "labelDy": 12 },
+    { "from": "ffmpeg", "to": "ramdisk", "variant": "emphasis", "label": "segmentos HLS", "fromSide": "bottom", "toSide": "top", "labelDy": 50 },
+    { "from": "ramdisk", "to": "nginxcache", "variant": "emphasis", "label": "alias serve", "route": "orthogonal-h", "fromSide": "left", "toSide": "right" },
+    { "from": "nginxcache", "to": "nginx", "label": "resposta 200", "variant": "default", "fromSide": "top", "toSide": "bottom" },
+    { "from": "nginx", "to": "users", "label": "HLS .m3u8/.ts", "variant": "default", "labelDy": 56 },
+    { "from": "serverjs", "to": "channelsdb", "label": "read/write", "variant": "dashed", "route": "orthogonal-v", "fromSide": "bottom", "toSide": "top", "labelDy": 56 },
+    { "from": "serverjs", "to": "logs", "label": "escreve logs", "variant": "dashed", "route": "orthogonal-v", "fromSide": "bottom", "toSide": "top", "labelAt": [320, 420] },
+    { "from": "nginx", "to": "logs", "label": "access log", "variant": "dashed", "route": "orthogonal-v", "fromSide": "bottom", "toSide": "top", "labelAt": [320, 400] },
+    { "from": "serverjs", "to": "blocked", "label": "deny IPs", "variant": "security", "route": "orthogonal-v", "fromSide": "bottom", "toSide": "top", "labelAt": [140, 420] },
+    { "from": "admin", "to": "serverjs", "label": "dashboard API", "variant": "emphasis", "labelDy": 56 },
+    { "from": "ffmpeg", "to": "videosource", "label": "lê MP4", "variant": "dashed", "route": "orthogonal-h", "fromSide": "left", "toSide": "right", "labelDy": 56 }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Especificações do Servidor",
+      "items": [
+        "Node.js v20.20.2",
+        "FFmpeg: 535 processos simultâneos",
+        "RAM Disk: /dev/shm (tmpfs)",
+        "Nginx: Proxy reverso + servidor HLS",
+        "HLS: segmentos de 15s, 10 na playlist"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Funcionalidades",
+      "items": [
+        "Cache Disco: toggle via .nocache flag",
+        "Segurança: bloqueio de IPs + User-Agent",
+        "Monitor: logs FFmpeg + Nginx + sistema",
+        "VOD: toggle por canal via .vod_{id} flag"
+      ]
+    }
+  ]
+}

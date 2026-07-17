@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "DRMPREMIUM — Ciclo de Vida de Requisição HLS",
+    "subtitle": "Browser solicita m3u8 e recebe segmentos de vídeo",
+    "output": "drmpremium-sequence.html",
+    "viewBox": [920, 820]
+  },
+  "participants": [
+    { "id": "browser", "type": "frontend", "label": "Browser", "sublabel": "hls.js / VLC" },
+    { "id": "nginx", "type": "cloud", "label": "Nginx", "sublabel": "porta 80" },
+    { "id": "nodejs", "type": "backend", "label": "Node.js", "sublabel": ":8080" },
+    { "id": "ramdisk", "type": "database", "label": "/dev/shm", "sublabel": "tmpfs" }
+  ],
+  "segments": [
+    { "from": 180, "to": 360, "label": "01 / AUTENTICAÇÃO" },
+    { "from": 380, "to": 600, "label": "02 / HLS STREAM" }
+  ],
+  "messages": [
+    { "from": "browser", "to": "nginx", "y": 210, "label": "GET /canais/1/index.m3u8", "variant": "emphasis" },
+    { "from": "nginx", "to": "nodejs", "y": 250, "label": "proxy_pass", "variant": "dashed" },
+    { "from": "nodejs", "to": "browser", "y": 300, "label": "302 → login.html", "variant": "return" },
+    { "from": "browser", "to": "nodejs", "y": 350, "label": "POST /api/login", "variant": "emphasis" },
+    { "from": "nodejs", "to": "browser", "y": 390, "label": "200 + Set-Cookie", "variant": "return" },
+    { "from": "browser", "to": "nginx", "y": 430, "label": "GET /canais/1/index.m3u8", "variant": "emphasis" },
+    { "from": "nginx", "to": "ramdisk", "y": 470, "label": "alias serve" },
+    { "from": "ramdisk", "to": "nginx", "y": 510, "label": "m3u8 content", "variant": "return" },
+    { "from": "nginx", "to": "browser", "y": 550, "label": "200 .m3u8", "variant": "return" },
+    { "from": "browser", "to": "nginx", "y": 600, "label": "GET segment_000.ts", "variant": "emphasis" },
+    { "from": "nginx", "to": "ramdisk", "y": 640, "label": "alias serve" },
+    { "from": "ramdisk", "to": "nginx", "y": 680, "label": "segment_000.ts", "variant": "return" },
+    { "from": "nginx", "to": "browser", "y": 720, "label": "200 video/mp2t", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "nginx", "from": 200, "to": 560, "type": "frontend" },
+    { "participant": "nodejs", "from": 240, "to": 400, "type": "backend" },
+    { "participant": "ramdisk", "from": 460, "to": 690, "type": "database" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Observações",
+      "items": ["Nginx faz proxy_pass para Node.js em toda rota /", "HLS segments servidos via alias direto no nginx", "Cache-Control: no-cache em todas as respostas HLS", "Session token via cookie HttpOnly com crypto.randomBytes"]
+    }
+  ]
+}

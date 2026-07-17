@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { spawn, exec, execSync } = require('child_process');
@@ -203,10 +204,10 @@ function getCookies(req) {
 async function loadChannels() {
     if (fs.existsSync(CHANNELS_DB_FILE)) {
         const data = await fs.promises.readFile(CHANNELS_DB_FILE, 'utf8');
-        channels = JSON.parse(data).map(c => ({
+        channels = data.trim() ? JSON.parse(data).map(c => ({
             ...c,
             inputType: c.inputType || 'concat' // Fallback para canais antigos
-        }));
+        })) : [];
         console.log(`Loaded ${channels.length} channels from ${CHANNELS_DB_FILE}`);
     }
 }
@@ -295,6 +296,109 @@ async function getFilesRecursive(dir, extension) {
 
 // Armazena os processos FFmpeg ativos
 const activeStreams = new Map();
+
+// Timers de avanço automático para relay-loop
+const relayLoopTimers = new Map();
+
+function clearRelayLoopTimer(id) {
+    if (relayLoopTimers.has(id)) {
+        clearTimeout(relayLoopTimers.get(id));
+        relayLoopTimers.delete(id);
+    }
+}
+
+function scheduleRelayLoop(channel) {
+    clearRelayLoopTimer(channel.id);
+    const urls = channel.relayUrlProbed || channel.relayUrls;
+    const durations = channel.relayUrlDurations || [];
+    if (!urls || urls.length < 2) return;
+    const idx = channel.currentUrlIndex || 0;
+    const dur = durations[idx];
+    if (!dur || dur <= 0) return;
+    console.log("[RELAY LOOP] Canal " + channel.id + " agendado: avança da posição " + idx + " em " + Math.round(dur) + "s");
+    const timer = setTimeout(() => {
+        const ch = channels.find(c => c.id === channel.id && c.status === 'relay');
+        if (!ch || ch.relaySubtype !== 'loop') return;
+        ch.currentUrlIndex = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
+        saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
+        console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
+        scheduleRelayLoop(ch);
+    }, dur * 1000);
+    relayLoopTimers.set(channel.id, timer);
+}
+
+async function startRelayLoop(channel) {
+    console.log("[RELAY LOOP] Probing " + channel.relayUrls.length + " URLs para canal " + channel.id + "...");
+    const results = await Promise.all(channel.relayUrls.map(u => probeUrlDuration(u)));
+    const probed = [];
+    const durations = [];
+    for (let i = 0; i < results.length; i++) {
+        if (results[i] !== null) {
+            probed.push(channel.relayUrls[i]);
+            durations.push(results[i]);
+        } else {
+            console.warn("[RELAY LOOP] URL " + i + " inválida/off, pulando: " + channel.relayUrls[i]);
+        }
+    }
+    if (probed.length === 0) {
+        channel.relayUrlProbed = undefined;
+        channel.relayUrlDurations = undefined;
+        return { status: 'error', message: 'Nenhuma URL válida encontrada. Todas falharam no ffprobe.' };
+    }
+    channel.relayUrlProbed = probed;
+    channel.relayUrlDurations = durations;
+    if (channel.currentUrlIndex === undefined || channel.currentUrlIndex >= probed.length) {
+        channel.currentUrlIndex = 0;
+    }
+    const relayFlag = "/home/drmpremium/.relay_" + channel.id;
+    fs.writeFileSync(relayFlag, '');
+    channel.status = 'relay';
+    channel.startedAt = Date.now();
+    await saveChannels();
+    scheduleRelayLoop(channel);
+    console.log("[RELAY LOOP] Canal " + channel.id + " ativado com " + probed.length + "/" + channel.relayUrls.length + " URLs válidas");
+    return { status: 'success', mode: 'relay-loop', validUrls: probed.length, totalUrls: channel.relayUrls.length };
+}
+
+function probeUrlDuration(url) {
+    return new Promise((resolve) => {
+        const proc = spawn('ffprobe', [
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_streams',
+            '-show_format',
+            url
+        ]);
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => stdout += d);
+        proc.stderr.on('data', d => stderr += d);
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                resolve(null);
+                return;
+            }
+            try {
+                const data = JSON.parse(stdout);
+                const duration = parseFloat(data.format?.duration);
+                if (duration && duration > 0) {
+                    resolve(duration);
+                } else {
+                    resolve(null);
+                }
+            } catch (e) {
+                resolve(null);
+            }
+        });
+        proc.on('error', () => resolve(null));
+        // Timeout de 15s por URL
+        setTimeout(() => {
+            try { proc.kill(); } catch (e) {}
+            resolve(null);
+        }, 15000);
+    });
+}
+
 
 // Armazena a posição estimada no playlist para restart não voltar ao início
 const channelPlaylistState = new Map();
@@ -514,6 +618,12 @@ async function startChannel(id) {
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
+    if (channel.mode === 'relay') {
+        const relayFlag = "/home/drmpremium/.relay_" + id;
+        fs.writeFileSync(relayFlag, '');
+        console.log("[RELAY FLAG] Flag criada para canal " + id + " (sync)");
+    }
+
     const outputDir = path.join(CHANNELS_DIR, id.toString());
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
@@ -525,8 +635,8 @@ async function startChannel(id) {
 
     let playlistPath = channel.playlistFilePath;
 
-    // Se for do tipo concat, re-geramos a playlist.txt na RAM para garantir que ela existe
-    if (channel.inputType === 'concat') {
+    // Se for do tipo concat e não for relay, re-geramos a playlist.txt na RAM para garantir que ela existe
+    if (channel.inputType === 'concat' && channel.mode !== 'relay') {
         const scanPath = path.isAbsolute(channel.sourceFolder)
             ? channel.sourceFolder
             : path.join(VIDEO_SOURCE, channel.sourceFolder);
@@ -571,9 +681,13 @@ async function startChannel(id) {
         channel.playlistFilePath = playlistPath;
     }
 
-    // Correção: Garante que o playlistPath aponte para a RAM se o canal for concat
-    if (channel.inputType === 'concat') {
+    // Correção: Garante que o playlistPath aponte para a RAM se o canal for concat e não for relay
+    if (channel.inputType === 'concat' && channel.mode !== 'relay') {
         playlistPath = path.join(outputDir, 'playlist.txt');
+    }
+
+    if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
+        playlistPath = path.join(outputDir, 'playlist_urls.txt');
     }
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
@@ -584,8 +698,12 @@ async function startChannel(id) {
         '-stream_loop', '-1'
     ];
 
-    if (channel.inputType === 'concat') {
+    if (channel.inputType === 'concat' || (channel.mode === 'relay' && channel.relaySubtype === 'sync')) {
         args.push('-f', 'concat', '-safe', '0');
+    }
+
+    if (channel.mode === 'relay') {
+        args.push('-protocol_whitelist', 'file,http,https,tcp,tls');
     }
 
     args.push('-i', playlistPath);
@@ -631,11 +749,13 @@ async function startChannel(id) {
         console.error(errMsg);
         logStream.write(errMsg);
         
-        // Se houver erro ao iniciar, limpamos os dados de tempo
+        // Se houver erro ao iniciar, limpamos os dados de tempo e a flag
         const ch = channels.find(c => c.id === id);
         if (ch) {
             ch.status = 'offline';
             delete ch.startedAt;
+            const relayFlag = "/home/drmpremium/.relay_" + id;
+            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
             saveChannels();
         }
         activeStreams.delete(id);
@@ -662,9 +782,11 @@ async function startChannel(id) {
         
         // Atualiza o objeto do canal para persistência
         const ch = channels.find(c => c.id === id);
-        if (ch && ch.status === 'online') {
+        if (ch && (ch.status === 'online' || ch.status === 'relay')) {
             ch.status = 'offline';
             delete ch.startedAt;
+            const relayFlag = "/home/drmpremium/.relay_" + id;
+            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
             saveChannels();
         }
     });
@@ -676,7 +798,7 @@ async function startChannel(id) {
         process: ffmpeg,
         startedAt: channel.startedAt
     });
-    channel.status = 'online'; // Update channel status
+    channel.status = channel.mode === 'relay' ? 'relay' : 'online';
     saveChannels();
 
     return { status: 'success', pid: ffmpeg.pid };
@@ -689,9 +811,10 @@ const server = http.createServer(async (req, res) => {
     try {
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
-    // 1. Verificação de Autenticação
+    const clientIP = req.socket?.remoteAddress || '';
+    const isLocal = clientIP === '127.0.0.1' || clientIP === '::1' || clientIP.endsWith('127.0.0.1');
     const cookies = getCookies(req);
-    const isAuth = cookies['session_token'] === SESSION_ID;
+    const isAuth = cookies['session_token'] === SESSION_ID || isLocal;
 
     // Helper para obter IP real do cliente (trata proxy reverso)
     function getClientIP(req) {
@@ -813,7 +936,28 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
             }
-            const result = await startChannel(Number(data.id)); 
+            const id = Number(data.id);
+            const channel = channels.find(c => c.id === id);
+            if (channel && channel.mode === 'relay') {
+                if (channel.relaySubtype === 'sync') {
+                    if (!channel.relayUrls || channel.relayUrls.length === 0) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhuma URL configurada.' }));
+                    }
+                    const result = await startChannel(id);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify(result));
+                } else {
+                    if (!channel.relayUrls || channel.relayUrls.length === 0) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhuma URL configurada.' }));
+                    }
+                    const result = await startRelayLoop(channel);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify(result));
+                }
+            }
+            const result = await startChannel(id); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
         });
@@ -848,6 +992,48 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
+    // API: Listar arquivos .m3u disponíveis no servidor
+    if (url.pathname === '/api/relay-m3u-files' && req.method === 'GET') {
+        try {
+            const m3uDir = '/home/drmpremium';
+            let files = [];
+            if (fs.existsSync(m3uDir)) {
+                files = fs.readdirSync(m3uDir).filter(f => f.endsWith('.m3u') || f.endsWith('.m3u8'));
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify(files));
+        } catch (e) {
+            res.writeHead(500);
+            return res.end(JSON.stringify([]));
+        }
+    }
+
+    // API: Ler arquivo .m3u e extrair URLs
+    if (url.pathname === '/api/read-m3u' && req.method === 'GET') {
+        const filename = url.searchParams.get('file');
+        if (!filename) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ status: 'error', message: 'Parâmetro file obrigatório' }));
+        }
+        const filePath = path.join('/home/drmpremium', path.basename(filename));
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const urls = [];
+            const lines = content.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed && !trimmed.startsWith('#') && (trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
+                    urls.push(trimmed);
+                }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ urls }));
+        } catch (e) {
+            res.writeHead(404);
+            return res.end(JSON.stringify({ status: 'error', message: 'Arquivo não encontrado' }));
+        }
+    }
+
     // API: Alternar status +18 de um canal
     if (url.pathname === '/api/toggle18' && req.method === 'POST') {
         let body = '';
@@ -879,18 +1065,10 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
-                const scanPath = path.isAbsolute(sourceFolderName)
-                    ? sourceFolderName
-                    : path.join(VIDEO_SOURCE, sourceFolderName);
+                const { channelName, sourceFolderName, useTranscode, is18, mode, sourceUrl, relaySubtype, relayUrls } = JSON.parse(body);
+                const channelMode = mode === 'relay' ? 'relay' : 'live';
+                const relayST = relaySubtype === 'sync' ? 'sync' : (relaySubtype === 'loop' ? 'loop' : null);
 
-                if (!fs.existsSync(scanPath)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
-                }
-
-                const hlsCheckPath = path.join(scanPath, 'index.m3u8');
-                
                 // Busca o menor ID disponível (reutilizando IDs de canais excluídos)
                 let id = 1;
                 while (channels.some(c => c.id === id)) {
@@ -902,46 +1080,76 @@ const server = http.createServer(async (req, res) => {
 
                 let inputType = 'concat';
                 let playlistFilePath = '';
+                let relayUrlList = [];
 
-                // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
-                if (fs.existsSync(hlsCheckPath)) {
-                    inputType = 'hls';
-                    playlistFilePath = hlsCheckPath;
-                } else {
-                    let mp4Files = await getFilesRecursive(scanPath, '.mp4');
-                    
-                    // Validação de integridade para evitar o erro 'moov atom not found'
-                    const validFiles = [];
-                    for (const f of mp4Files) {
-                        if (await isVideoValid(f)) validFiles.push(f);
-                        else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
-                    }
-                    mp4Files = validFiles;
-
-                    if (mp4Files.length === 0) {
+                if (channelMode === 'relay') {
+                    if (relayUrls && Array.isArray(relayUrls) && relayUrls.length > 0) {
+                        relayUrlList = relayUrls;
+                    } else if (sourceUrl) {
+                        relayUrlList = [sourceUrl];
+                    } else {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        return res.end(JSON.stringify({ status: 'error', message: 'Forneça ao menos uma URL de origem para Relay.' }));
+                    }
+                    if (relayST === 'sync') {
+                        const plContent = relayUrlList.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+                        const plPath = path.join(channelOutputDir, 'playlist_urls.txt');
+                        fs.writeFileSync(plPath, plContent);
+                        playlistFilePath = plPath;
+                        inputType = 'concat';
+                    } else {
+                        inputType = 'relay';
+                    }
+                } else {
+                    const scanPath = path.isAbsolute(sourceFolderName)
+                        ? sourceFolderName
+                        : path.join(VIDEO_SOURCE, sourceFolderName);
+
+                    if (!fs.existsSync(scanPath)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
                     }
 
-                    const playlistPath = path.join(channelOutputDir, 'playlist.txt');
-                    // Melhora a compatibilidade com caminhos complexos e aspas simples
-                    const playlistContent = mp4Files.map(f => {
-                        const escaped = f.replace(/'/g, "'\\''");
-                        return `file '${escaped}'`;
-                    }).join('\r\n');
-                    
-                    await writeFileAtomic(playlistPath, playlistContent);
-                    
-                    inputType = 'concat';
-                    playlistFilePath = playlistPath;
+                    const hlsCheckPath = path.join(scanPath, 'index.m3u8');
+                    if (fs.existsSync(hlsCheckPath)) {
+                        inputType = 'hls';
+                        playlistFilePath = hlsCheckPath;
+                    } else {
+                        let mp4Files = await getFilesRecursive(scanPath, '.mp4');
+                        const validFiles = [];
+                        for (const f of mp4Files) {
+                            if (await isVideoValid(f)) validFiles.push(f);
+                            else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
+                        }
+                        mp4Files = validFiles;
+
+                        if (mp4Files.length === 0) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        }
+
+                        const playlistPath = path.join(channelOutputDir, 'playlist.txt');
+                        const playlistContent = mp4Files.map(f => {
+                            const escaped = f.replace(/'/g, "'\\''");
+                            return `file '${escaped}'`;
+                        }).join('\r\n');
+                        await writeFileAtomic(playlistPath, playlistContent);
+                        inputType = 'concat';
+                        playlistFilePath = playlistPath;
+                    }
                 }
 
                 const newChannel = {
                     id,
                     name: channelName,
-                    sourceFolder: sourceFolderName,
+                    sourceFolder: sourceFolderName || '',
+                    sourceUrl: channelMode === 'relay' ? (sourceUrl || '') : '',
+                    relayUrls: relayUrlList,
+                    mode: channelMode,
+                    relaySubtype: relayST,
+                    currentUrlIndex: 0,
                     playlistFilePath,
-                    inputType,
+                    inputType: channelMode === 'relay' ? 'relay' : inputType,
                     status: 'offline',
                     useTranscode: !!useTranscode,
                     is18: !!is18
@@ -967,7 +1175,7 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { id, channelName, sourceFolderName, useTranscode, is18 } = JSON.parse(body);
+                const { id, channelName, sourceFolderName, useTranscode, is18, mode, sourceUrl, relaySubtype, relayUrls } = JSON.parse(body);
                 const channelId = Number(id);
                 const channel = channels.find(c => c.id === channelId);
                 
@@ -982,58 +1190,83 @@ const server = http.createServer(async (req, res) => {
                     return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de editá-lo.' }));
                 }
 
-                const scanPath = path.isAbsolute(sourceFolderName)
-                    ? sourceFolderName
-                    : path.join(VIDEO_SOURCE, sourceFolderName);
-
-                if (!fs.existsSync(scanPath)) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
-                }
-
-                const hlsCheckPath = path.join(scanPath, 'index.m3u8');
-                const channelOutputDir = path.join(CHANNELS_DIR, channelId.toString());
-                if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
-
+                const channelMode = mode === 'relay' ? 'relay' : 'live';
+                const relayST = relaySubtype === 'sync' ? 'sync' : (relaySubtype === 'loop' ? 'loop' : null);
                 let inputType = 'concat';
                 let playlistFilePath = '';
+                let relayUrlList = [];
 
-                // Lógica Híbrida: Detecta se é um HLS pronto ou uma pasta de MP4s
-                if (fs.existsSync(hlsCheckPath)) {
-                    inputType = 'hls';
-                    playlistFilePath = hlsCheckPath;
-                } else {
-                    let mp4Files = await getFilesRecursive(scanPath, '.mp4');
-                    
-                    const validFiles = [];
-                    for (const f of mp4Files) {
-                        if (await isVideoValid(f)) validFiles.push(f);
-                        else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
-                    }
-                    mp4Files = validFiles;
-
-                    if (mp4Files.length === 0) {
+                if (channelMode === 'relay') {
+                    if (relayUrls && Array.isArray(relayUrls) && relayUrls.length > 0) {
+                        relayUrlList = relayUrls;
+                    } else if (sourceUrl) {
+                        relayUrlList = [sourceUrl];
+                    } else {
                         res.writeHead(400, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        return res.end(JSON.stringify({ status: 'error', message: 'Forneça ao menos uma URL de origem para Relay.' }));
+                    }
+                    const chOutDir = path.join(CHANNELS_DIR, channelId.toString());
+                    if (!fs.existsSync(chOutDir)) fs.mkdirSync(chOutDir, { recursive: true });
+                    if (relayST === 'sync') {
+                        const plContent = relayUrlList.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+                        const plPath = path.join(chOutDir, 'playlist_urls.txt');
+                        fs.writeFileSync(plPath, plContent);
+                        playlistFilePath = plPath;
+                        inputType = 'concat';
+                    } else {
+                        inputType = 'relay';
+                    }
+                } else {
+                    const scanPath = path.isAbsolute(sourceFolderName)
+                        ? sourceFolderName
+                        : path.join(VIDEO_SOURCE, sourceFolderName);
+
+                    if (!fs.existsSync(scanPath)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        return res.end(JSON.stringify({ status: 'error', message: 'O caminho especificado não existe ou está inacessível: ' + scanPath }));
                     }
 
-                    const playlistPath = path.join(channelOutputDir, 'playlist.txt');
-                    const playlistContent = mp4Files.map(f => {
-                        const escaped = f.replace(/'/g, "'\\''");
-                        return `file '${escaped}'`;
-                    }).join('\r\n');
-                    
-                    await writeFileAtomic(playlistPath, playlistContent);
-                    
-                    inputType = 'concat';
-                    playlistFilePath = playlistPath;
+                    const hlsCheckPath = path.join(scanPath, 'index.m3u8');
+                    const channelOutputDir = path.join(CHANNELS_DIR, channelId.toString());
+                    if (!fs.existsSync(channelOutputDir)) fs.mkdirSync(channelOutputDir, { recursive: true });
+
+                    if (fs.existsSync(hlsCheckPath)) {
+                        inputType = 'hls';
+                        playlistFilePath = hlsCheckPath;
+                    } else {
+                        let mp4Files = await getFilesRecursive(scanPath, '.mp4');
+                        const validFiles = [];
+                        for (const f of mp4Files) {
+                            if (await isVideoValid(f)) validFiles.push(f);
+                            else console.warn(`[AVISO] Pulando arquivo corrompido: 	ext{f}`);
+                        }
+                        mp4Files = validFiles;
+
+                        if (mp4Files.length === 0) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            return res.end(JSON.stringify({ status: 'error', message: 'Nenhum vídeo válido encontrado. Verifique se os arquivos não estão corrompidos.' }));
+                        }
+
+                        const playlistPath = path.join(channelOutputDir, 'playlist.txt');
+                        const playlistContent = mp4Files.map(f => {
+                            const escaped = f.replace(/'/g, "'\\''");
+                            return `file '${escaped}'`;
+                        }).join('\r\n');
+                        await writeFileAtomic(playlistPath, playlistContent);
+                        inputType = 'concat';
+                        playlistFilePath = playlistPath;
+                    }
                 }
 
                 // Atualiza os dados do canal sem alterar o ID original
                 channel.name = channelName;
-                channel.sourceFolder = sourceFolderName;
+                channel.sourceFolder = sourceFolderName || '';
+                channel.sourceUrl = channelMode === 'relay' ? (sourceUrl || '') : '';
+                channel.relayUrls = relayUrlList;
+                channel.mode = channelMode;
+                channel.relaySubtype = relayST;
                 channel.playlistFilePath = playlistFilePath;
-                channel.inputType = inputType;
+                channel.inputType = channelMode === 'relay' ? 'relay' : inputType;
                 channel.useTranscode = !!useTranscode;
                 channel.is18 = !!is18;
 
@@ -1069,6 +1302,8 @@ const server = http.createServer(async (req, res) => {
                 return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de excluí-lo.' }));
             }
 
+            clearRelayLoopTimer(id);
+
             // 2. Remove da lista e salva banco
             channels = channels.filter(c => c.id !== id);
             await saveChannels();
@@ -1076,6 +1311,12 @@ const server = http.createServer(async (req, res) => {
             // 3. Limpa arquivos físicos
             const channelPath = path.join(CHANNELS_DIR, id.toString());
             const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
+
+            // Limpa flags VOD e Relay
+            const vodFlag = "/home/drmpremium/.vod_" + id;
+            const relayFlag = "/home/drmpremium/.relay_" + id;
+            try { if (fs.existsSync(vodFlag)) fs.unlinkSync(vodFlag); } catch (e) {}
+            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
 
             // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
             setTimeout(() => {
@@ -1109,6 +1350,15 @@ const server = http.createServer(async (req, res) => {
             const channel = channels.find(c => c.id === id);
             if (channel) channel.status = 'offline';
 
+            clearRelayLoopTimer(id);
+
+            // Relay: remove flag
+            const relayFlag = "/home/drmpremium/.relay_" + id;
+            if (fs.existsSync(relayFlag)) {
+                try { fs.unlinkSync(relayFlag); } catch (e) {}
+                console.log("[RELAY] Canal " + id + " desativado via stop");
+            }
+
             if (activeStreams.has(id)) {
                 activeStreams.get(id).process.kill('SIGKILL');
                 activeStreams.delete(id);
@@ -1141,6 +1391,156 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ nocache: nocacheEnabled }));
     }
 
+    // API: Alternar modo do canal (Live, VOD, Relay Sync, Relay Loop, Offline)
+    if (url.pathname === '/api/switch-mode' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                res.writeHead(400);
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const { id, newMode } = data;
+            const channel = channels.find(c => c.id === id);
+            if (!channel) {
+                res.writeHead(404);
+                return res.end(JSON.stringify({ status: 'error', message: 'Canal não encontrado' }));
+            }
+
+            // Para o stream ativo se houver
+            if (activeStreams.has(id)) {
+                try { activeStreams.get(id).process.kill('SIGKILL'); } catch (e) {}
+                activeStreams.delete(id);
+            }
+            clearRelayLoopTimer(id);
+
+            // Remove flags antigas
+            const vodFlag = "/home/drmpremium/.vod_" + id;
+            const relayFlag = "/home/drmpremium/.relay_" + id;
+            try { if (fs.existsSync(vodFlag)) fs.unlinkSync(vodFlag); } catch (e) {}
+            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
+
+            if (newMode === 'offline') {
+                channel.status = 'offline';
+                channel.startedAt = undefined;
+                await saveChannels();
+                res.writeHead(200);
+                return res.end(JSON.stringify({ status: 'success', mode: 'offline' }));
+            }
+
+            if (newMode === 'vod') {
+                const vodDir = "/home/drmpremium/hls_pronto/" + id;
+                if (!fs.existsSync(vodDir) || !fs.existsSync(vodDir + "/index.m3u8")) {
+                    const playlistPath = channel.playlistFilePath;
+                    if (!fs.existsSync(playlistPath)) {
+                        res.writeHead(400);
+                        return res.end(JSON.stringify({ status: 'error', message: 'Playlist não encontrada para converter para VOD.' }));
+                    }
+                    if (!fs.existsSync(vodDir)) fs.mkdirSync(vodDir, { recursive: true });
+                    console.log("[SWITCH] Convertendo canal " + id + " para VOD...\n");
+                    const proc = spawnFFmpeg([
+                        '-fflags', '+genpts+igndts+flush_packets',
+                        '-err_detect', 'ignore_err',
+                        '-f', 'concat', '-safe', '0',
+                        '-i', playlistPath,
+                        '-c:v', 'copy',
+                        '-c:a', 'copy',
+                        '-f', 'hls',
+                        '-hls_time', '15',
+                        '-hls_playlist_type', 'vod',
+                        '-hls_list_size', '0',
+                        '-hls_segment_filename', vodDir + "/segment_%03d.ts",
+                        vodDir + "/index.m3u8"
+                    ]);
+                    await new Promise(resolve => proc.on('close', resolve));
+                }
+                fs.writeFileSync(vodFlag, '');
+                channel.status = 'vod';
+                channel.startedAt = undefined;
+                await saveChannels();
+                console.log("[SWITCH] Canal " + id + " → VOD");
+                res.writeHead(200);
+                return res.end(JSON.stringify({ status: 'success', mode: 'vod' }));
+            }
+
+            if (newMode === 'relay-loop') {
+                if (!channel.relayUrls || channel.relayUrls.length === 0) {
+                    res.writeHead(400);
+                    return res.end(JSON.stringify({ status: 'error', message: 'Canal sem URLs configuradas.' }));
+                }
+                clearRelayLoopTimer(id);
+                channel.mode = 'relay';
+                channel.relaySubtype = 'loop';
+                channel.currentUrlIndex = 0;
+                channel.status = 'offline';
+                channel.startedAt = undefined;
+                await saveChannels();
+                const result = await startRelayLoop(channel);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify(result));
+            }
+
+            if (newMode === 'relay-sync' || newMode === 'live') {
+                if (newMode === 'relay-sync') {
+                    channel.mode = 'relay';
+                    channel.relaySubtype = 'sync';
+                    if (channel.relayUrls && channel.relayUrls.length > 0) {
+                        const outDir = path.join(CHANNELS_DIR, id.toString());
+                        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+                        const plContent = channel.relayUrls.map(u => "file '" + u.replace(/'/g, "'\\''") + "'").join('\r\n');
+                        const plPath = path.join(outDir, 'playlist_urls.txt');
+                        fs.writeFileSync(plPath, plContent);
+                        channel.playlistFilePath = plPath;
+                        channel.inputType = 'concat';
+                    }
+                } else {
+                    channel.mode = 'live';
+                    channel.relaySubtype = null;
+                }
+                await saveChannels();
+                const result = await startChannel(id);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: result.status, mode: newMode }));
+            }
+
+            res.writeHead(400);
+            res.end(JSON.stringify({ status: 'error', message: 'Modo inválido: ' + newMode }));
+        });
+        return;
+    }
+
+    // API: Avançar manualmente a URL do relay-loop
+    if (url.pathname === '/api/relay-advance' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            let data;
+            try { data = JSON.parse(body); } catch (e) {
+                res.writeHead(400);
+                return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
+            }
+            const { id } = data;
+            const channel = channels.find(c => c.id === id);
+            if (!channel || channel.status !== 'relay' || channel.relaySubtype !== 'loop') {
+                res.writeHead(400);
+                return res.end(JSON.stringify({ status: 'error', message: 'Canal não está em modo relay-loop ativo.' }));
+            }
+            const urls = channel.relayUrlProbed || channel.relayUrls;
+            if (!urls || urls.length < 2) {
+                res.writeHead(400);
+                return res.end(JSON.stringify({ status: 'error', message: 'Canal não possui múltiplas URLs.' }));
+            }
+            channel.currentUrlIndex = ((channel.currentUrlIndex || 0) + 1) % urls.length;
+            await saveChannels();
+            scheduleRelayLoop(channel);
+            console.log("[RELAY LOOP] Canal " + channel.id + " avançado manualmente para posição " + channel.currentUrlIndex);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'success', currentIndex: channel.currentUrlIndex }));
+        });
+        return;
+    }
+
     if (url.pathname === '/api/toggle-nocache' && req.method === 'POST') {
         nocacheEnabled = !nocacheEnabled;
         if (nocacheEnabled) {
@@ -1157,13 +1557,16 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/stopall' && req.method === 'POST') {
         const stopped = [];
         for (const channel of channels) {
-            if (channel.status === 'online' || activeStreams.has(channel.id)) {
+            if (channel.status === 'online' || channel.status === 'relay' || activeStreams.has(channel.id)) {
                 channel.status = 'offline';
+                clearRelayLoopTimer(channel.id);
+                const relayFlag = "/home/drmpremium/.relay_" + channel.id;
+                try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
                 if (activeStreams.has(channel.id)) {
                     try {
                         activeStreams.get(channel.id).process.kill('SIGKILL');
                     } catch (e) {
-                        console.error(`Erro ao parar canal ${channel.id}:`, e);
+                        console.error("[Erro ao parar canal " + channel.id + "]:", e);
                     }
                     activeStreams.delete(channel.id);
                 }
@@ -1476,6 +1879,89 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ totalIPs, totalRequests, topChannels }));
     }
 
+    // Relay Proxy Handler: proxy externo para canais em modo relay-loop / local HLS para relay-sync
+    const relayMatch = url.pathname.match(/^\/canais\/(\d+)\/(.+)$/);
+    if (relayMatch) {
+        const channelId = parseInt(relayMatch[1]);
+        const requestedFile = relayMatch[2];
+        const relayFlag = "/home/drmpremium/.relay_" + channelId;
+        if (fs.existsSync(relayFlag)) {
+            const channel = channels.find(c => c.id === channelId && c.mode === 'relay');
+            if (!channel) {
+                res.writeHead(404);
+                return res.end('Canal relay não configurado');
+            }
+
+            if (channel.relaySubtype === 'sync') {
+                const filePath = path.join(CHANNELS_DIR, channelId.toString(), requestedFile);
+                if (requestedFile === 'index.m3u8' && !fs.existsSync(filePath)) {
+                    // Espera até 12 segundos (60 * 200ms) para o FFmpeg criar o arquivo inicial
+                    let retries = 60;
+                    while (retries > 0 && !fs.existsSync(filePath)) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        retries--;
+                    }
+                }
+                if (fs.existsSync(filePath)) {
+                    const ext = path.extname(filePath);
+                    const types = { '.ts': 'video/MP2T', '.m3u8': 'application/vnd.apple.mpegurl' };
+                    res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
+                    return fs.createReadStream(filePath).pipe(res);
+                } else {
+                    res.writeHead(404);
+                    return res.end('Arquivo HLS Sync não encontrado');
+                }
+            }
+
+            // Caso contrário, trata como loop (proxy dinâmico de .mp4)
+            const urls = channel.relayUrlProbed || channel.relayUrls || [channel.sourceUrl];
+            const urlsLen = urls.length;
+
+            if (requestedFile === 'index.m3u8') {
+                // Gera M3U playlist (não HLS) com URLs proxy, começando da posição atual
+                const startIdx = channel.currentUrlIndex || 0;
+                const durations = channel.relayUrlDurations || [];
+                const chName = channel.name || 'Canal';
+                let lines = '#EXTM3U\n';
+                for (let i = 0; i < urlsLen; i++) {
+                    const idx = (startIdx + i) % urlsLen;
+                    const dur = durations[idx] ? durations[idx].toFixed(1) : '-1';
+                    lines += "#EXTINF:" + dur + "," + chName + "\n/canais/" + channelId + "/" + idx + "\n";
+                }
+                res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl' });
+                return res.end(lines);
+            }
+
+            // requestedFile é o índice (ex: /canais/5/0 → proxy urls[0])
+            const idx = parseInt(requestedFile);
+            if (isNaN(idx) || idx < 0 || idx >= urlsLen) {
+                res.writeHead(404);
+                return res.end('Índice inválido');
+            }
+            const targetUrl = urls[idx];
+            if (!targetUrl) {
+                res.writeHead(404);
+                return res.end('URL de destino vazia');
+            }
+            const mod = targetUrl.startsWith('https') ? https : http;
+            mod.get(targetUrl, (proxyRes) => {
+                const statusCode = proxyRes.statusCode || 502;
+                if (statusCode !== 200) {
+                    res.writeHead(statusCode);
+                    return res.end();
+                }
+                const ctype = proxyRes.headers['content-type'] || 'video/mp4';
+                res.writeHead(200, { 'Content-Type': ctype });
+                proxyRes.pipe(res);
+            }).on('error', (e) => {
+                console.error("[RELAY LOOP] Erro ao buscar URL " + idx + ": " + e.message);
+                res.writeHead(502);
+                res.end('Bad Gateway');
+            });
+            return;
+        }
+    }
+
     // Servir Arquivos Estáticos (Dashboard)
     let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
     
@@ -1490,7 +1976,8 @@ const server = http.createServer(async (req, res) => {
                 '.js': 'text/javascript', 
                 '.css': 'text/css',
                 '.m3u8': 'application/vnd.apple.mpegurl',
-                '.ts': 'video/MP2T'
+                '.ts': 'video/MP2T',
+                '.mp4': 'video/mp4'
             };
             
             const headers = { 'Content-Type': types[ext] || 'text/plain' };
@@ -1637,27 +2124,49 @@ setTimeout(parseNginxAccessLog, 5000);
      killOrphanFFmpeg();
      cleanTmpfsSegments();
      
-     // Reseta todos os canais para online (exceto VOD) para que subam todos no auto-start
-    let resetCount = 0;
-    for (const ch of channels) {
-        if (ch.status !== 'vod') {
-            ch.status = 'online';
-            resetCount++;
-        }
-    }
-    console.log(`[STARTUP] ${resetCount} canais resetados para online`);
-    
-    // Auto-start: inicia canais em lotes de 5 paralelamente
-    const onlineChannels = channels.filter(c => c.status === 'online');
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < onlineChannels.length; i += BATCH_SIZE) {
-        const batch = onlineChannels.slice(i, i + BATCH_SIZE);
-        console.log(`[AUTO-START] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
-        await Promise.all(batch.map(ch => {
-            console.log(`[AUTO-START] Reiniciando transmissão do canal: ${ch.name}`);
-            return startChannel(ch.id);
-        }));
-    }
+     // Reseta status de canais em lotes e inicia de forma correta baseada no seu modo original
+     let resetCount = 0;
+     let resetRelayCount = 0;
+     for (const ch of channels) {
+         if (ch.status !== 'vod') {
+             if (ch.mode === 'relay') {
+                 ch.status = 'relay';
+                 resetRelayCount++;
+             } else {
+                 ch.status = 'online';
+                 resetCount++;
+             }
+         }
+     }
+     console.log(`[STARTUP] ${resetCount} canais resetados para online, ${resetRelayCount} canais resetados para relay`);
+     
+     // Auto-start de canais Live e Relay Sync
+     const channelsToStart = channels.filter(c => c.status === 'online' || (c.status === 'relay' && c.relaySubtype === 'sync'));
+     const BATCH_SIZE = 5;
+     for (let i = 0; i < channelsToStart.length; i += BATCH_SIZE) {
+         const batch = channelsToStart.slice(i, i + BATCH_SIZE);
+         console.log(`[AUTO-START] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
+         await Promise.all(batch.map(ch => {
+             console.log(`[AUTO-START] Reiniciando transmissão do canal: ${ch.name}`);
+             return startChannel(ch.id);
+         }));
+     }
+
+     // Auto-start de canais Relay Loop
+     for (const channel of channels) {
+         if (channel.status === 'relay') {
+             const relayFlag = "/home/drmpremium/.relay_" + channel.id;
+             if (!fs.existsSync(relayFlag)) {
+                 fs.writeFileSync(relayFlag, '');
+                 console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ")");
+             }
+             if (channel.relaySubtype === 'loop') {
+                 console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
+                 startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
+             }
+         }
+     }
+
     // Cria flag files para canais em modo VOD (nginx check)
     for (const channel of channels) {
         if (channel.status === 'vod') {

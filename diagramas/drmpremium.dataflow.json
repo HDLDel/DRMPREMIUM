@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "DRMPREMIUM — Pipeline de Vídeo HLS",
+    "subtitle": "Do arquivo MP4 no HD até o segmento .ts no browser",
+    "output": "drmpremium-dataflow.html",
+    "viewBox": [1100, 720]
+  },
+  "stages": [
+    { "label": "Origem" },
+    { "label": "Transcodificação" },
+    { "label": "Cache" },
+    { "label": "Distribuição" },
+    { "label": "Consumo" }
+  ],
+  "nodes": [
+    { "id": "mp4", "type": "database", "label": "MP4 originais", "stage": 0, "row": 0, "sublabel": "24HORAS/ (HD SATA)" },
+    { "id": "playlist_concat", "type": "backend", "label": "Playlist concat", "stage": 0, "row": 1, "sublabel": "playlist.txt no /dev/shm" },
+    { "id": "ffmpeg_input", "type": "backend", "label": "FFmpeg input", "stage": 1, "row": 0, "sublabel": "-f concat -safe 0" },
+    { "id": "transcode", "type": "backend", "label": "Transcode ou copy", "stage": 1, "row": 1, "sublabel": "libx264 / copy + aac copy" },
+    { "id": "hls_muxer", "type": "backend", "label": "HLS muxer", "stage": 1, "row": 2, "sublabel": "-f hls -hls_time 15" },
+    { "id": "segments", "type": "database", "label": "Segmentos .ts", "stage": 2, "row": 0, "sublabel": "/dev/shm (tmpfs em RAM)", "tag": "15s cada" },
+    { "id": "m3u8", "type": "database", "label": "index.m3u8", "stage": 2, "row": 1, "sublabel": "playlist de 10 segmentos" },
+    { "id": "nginx_alias", "type": "cloud", "label": "Nginx alias", "stage": 3, "row": 0, "sublabel": "location /canais/{id}/" },
+    { "id": "vod_flag", "type": "security", "label": "Flag VOD", "stage": 3, "row": 1, "sublabel": ".vod_{id} check" },
+    { "id": "browser", "type": "frontend", "label": "Browser", "stage": 4, "row": 0, "sublabel": "hls.js / VLC / IPTV" }
+  ],
+  "flows": [
+    { "from": "mp4", "to": "playlist_concat", "label": "scan + validate", "variant": "dashed", "classification": "scan" },
+    { "from": "playlist_concat", "to": "ffmpeg_input", "label": "file list", "variant": "emphasis", "classification": "concat" },
+    { "from": "ffmpeg_input", "to": "transcode", "label": "raw packets", "classification": "decode" },
+    { "from": "transcode", "to": "hls_muxer", "label": "encoded frames", "classification": "mux" },
+    { "from": "hls_muxer", "to": "segments", "label": "segment_%03d.ts", "variant": "emphasis", "classification": "HLS write" },
+    { "from": "hls_muxer", "to": "m3u8", "label": "index.m3u8", "variant": "emphasis", "classification": "playlist" },
+    { "from": "segments", "to": "nginx_alias", "label": "HTTP GET", "variant": "emphasis", "classification": "serve" },
+    { "from": "m3u8", "to": "nginx_alias", "label": "HTTP GET", "variant": "emphasis", "classification": "serve" },
+    { "from": "nginx_alias", "to": "vod_flag", "label": "check flag", "variant": "security", "classification": "routing" },
+    { "from": "nginx_alias", "to": "browser", "label": "HTTP 200", "variant": "emphasis", "classification": "HLS stream" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Configuração HLS",
+      "items": ["HLS time: 15 segundos por segmento", "List size: 10 segmentos no playlist", "Flags: delete_segments + append_list + omit_endlist + independent_segments", "Modo transcode: libx264 ultrafast, 24fps, CRF 28, 1 thread"]
+    },
+    {
+      "dot": "violet",
+      "title": "Pipeline de Memória",
+      "items": ["MP4 lidos do HD SATA (pool de 116GB RAM)", "Playlist.txt gerado no /dev/shm (RAM)", "Segmentos .ts escritos no /dev/shm (tmpfs)", "Nginx serve direto do tmpfs → zero I/O de disco"]
+    }
+  ]
+}

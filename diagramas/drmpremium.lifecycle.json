@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "DRMPREMIUM — Estados de Canal",
+    "subtitle": "offline → transmissão → offline",
+    "output": "drmpremium-lifecycle.html",
+    "viewBox": [1100, 700]
+  },
+  "lanes": [
+    { "id": "main", "label": "Estado Principal" },
+    { "id": "terminal", "label": "Terminal" }
+  ],
+  "states": [
+    { "id": "offline", "type": "start", "label": "Offline", "lane": "main", "col": 0, "step": "00" },
+    { "id": "starting", "type": "active", "label": "Iniciando", "lane": "main", "col": 1, "step": "01", "sublabel": "validação" },
+    { "id": "online", "type": "active", "label": "Online", "lane": "main", "col": 2, "step": "02", "sublabel": "transmitindo" },
+    { "id": "relay", "type": "active", "label": "Relay", "lane": "main", "col": 3, "step": "03", "sublabel": "loop/sync" },
+    { "id": "stopping", "type": "waiting", "label": "Parando", "lane": "main", "col": 4, "step": "04" },
+    { "id": "completed", "type": "success", "label": "Finalizado", "lane": "terminal", "col": 0 },
+    { "id": "errored", "type": "failure", "label": "Erro", "lane": "terminal", "col": 1, "sublabel": "crash" }
+  ],
+  "transitions": [
+    { "from": "offline", "to": "starting", "variant": "emphasis", "label": "POST /start", "labelDy": 55 },
+    { "from": "starting", "to": "online", "variant": "emphasis", "label": "FFmpeg OK", "labelDy": 55 },
+    { "from": "starting", "to": "errored", "variant": "security", "label": "sem vídeos" },
+    { "from": "online", "to": "relay", "variant": "dashed", "label": "muda modo", "labelDy": 55 },
+    { "from": "online", "to": "stopping", "label": "stop", "fromSide": "bottom", "toSide": "top", "labelDy": 55 },
+    { "from": "relay", "to": "stopping", "label": "stop", "fromSide": "bottom", "toSide": "top", "labelDy": 55 },
+    { "from": "online", "to": "errored", "variant": "security", "label": "crash" },
+    { "from": "relay", "to": "errored", "variant": "security", "label": "URL fail" },
+    { "from": "stopping", "to": "completed", "variant": "emphasis" },
+    { "from": "completed", "to": "offline", "variant": "default" },
+    { "from": "errored", "to": "offline", "variant": "default", "label": "status=offline" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ações que alteram estado",
+      "items": ["Start: escaneia + valida + spawn FFmpeg", "Stop: kill FFmpeg + limpa flags", "Erro: status offline automático"]
+    }
+  ]
+}

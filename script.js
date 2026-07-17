@@ -214,50 +214,65 @@ async function loadAndRenderChannels(filter = '') {
             const nameCell = row.insertCell();
             let nameHTML = channel.name;
             if (channel.is18) {
-                nameHTML += ` <span style="background:#ff4444; color:white; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:bold; cursor:pointer;" onclick="toggle18(${channel.id})" title="Clique para desmarcar +18">18+ 🔞</span>`;
+                nameHTML += " <span style=\"background:#ff4444; color:white; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:bold; cursor:pointer;\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para desmarcar +18\">18+ 🔞</span>";
             } else {
-                nameHTML += ` <span style="border:1px solid #6e7681; color:#8b949e; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; cursor:pointer;" onclick="toggle18(${channel.id})" title="Clique para marcar como +18">+18?</span>`;
+                nameHTML += " <span style=\"border:1px solid #6e7681; color:#8b949e; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; cursor:pointer;\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para marcar como +18\">+18?</span>";
             }
             nameCell.innerHTML = nameHTML;
             
             const statusCell = row.insertCell();
-            let statusColor = '#ff4444'; // padrão offline
+            let statusColor = '#ff4444';
+            let statusText = 'OFFLINE';
+            
             if (channel.status === 'online') {
                 statusColor = '#00ff99';
+                statusText = 'LIVE';
             } else if (channel.status === 'vod') {
-                statusColor = '#60a5fa';
+                statusColor = '#3b82f6';
+                statusText = 'VOD';
+            } else if (channel.status === 'relay') {
+                statusColor = '#a855f7';
+                statusText = channel.relaySubtype === 'loop' 
+                    ? "LOOP (#" + ((channel.currentUrlIndex || 0) + 1) + ")" 
+                    : 'RELAY (SYNC)';
             }
-            statusCell.innerHTML = `<span style="color: ${statusColor}">${channel.status.toUpperCase()}</span>`;
+            statusCell.innerHTML = "<span style=\"color: " + statusColor + "; font-weight: bold;\">" + statusText + "</span>";
             
-            row.insertCell().innerText = channel.status === 'online' ? formatUptime(channel.uptime) : '-';
+            const isActive = (channel.status === 'online' || channel.status === 'relay');
+            row.insertCell().innerText = isActive ? formatUptime(channel.uptime) : '-';
+            
             const actionsCell = row.insertCell();
-            const streamUrl = `/canais/${channel.id}/index.m3u8`;
-
+            const streamUrl = "/canais/" + channel.id + "/index.m3u8";
+            
+            let actionBtns = '';
+            
+            // Botão Iniciar/Parar
             if (channel.status === 'offline') {
-                actionsCell.innerHTML = `
-                    <button onclick="start(${channel.id})" title="Iniciar">▶ Iniciar</button>
-                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
-                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
-                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
-                `;
-            } else if (channel.status === 'vod') {
-                actionsCell.innerHTML = `
-                    <button onclick="toggleVod(${channel.id})" style="background:#8b5cf6; color:white;" title="Alternar para Live">🔄 Live</button>
-                    <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
-                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
-                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
-                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
-                `;
-            } else { // online
-                actionsCell.innerHTML = `
-                    <button class="stop" onclick="stop(${channel.id})" title="Parar">⏹ Parar</button>
-                    <button onclick="toggleVod(${channel.id})" style="background:#8b5cf6; color:white;" title="Alternar para VOD">🔄 VOD</button>
-                    <button class="btn-watch" onclick="window.open('${streamUrl}', '_blank')" title="Assistir">▶ Assistir</button>
-                    <button class="btn-edit" onclick="showEditChannelModal(${channel.id})" style="background:#d97706; color:white;" title="Editar">✏️ Editar</button>
-                    <button class="btn-logs" onclick="viewLogs(${channel.id}, '${channel.name}')" title="Logs">📝 Logs</button>
-                    <button class="btn-delete" onclick="deleteChannel(${channel.id}, '${channel.status}')" title="Excluir">✖ Excluir</button>
-                `;
+                actionBtns += "<button onclick=\"start(" + channel.id + ")\" title=\"Iniciar\" style=\"background:#10b981; color:white;\">▶ Iniciar</button>";
+            } else {
+                actionBtns += "<button onclick=\"stop(" + channel.id + ")\" class=\"stop\" title=\"Parar\" style=\"background:#ef4444; color:white;\">⏹ Parar</button>";
             }
+            
+            // Botão Avançar (apenas para Relay Loop)
+            if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
+                actionBtns += "<button onclick=\"advanceRelay(" + channel.id + ")\" title=\"Próximo Vídeo\" style=\"background:#f59e0b; color:white;\">⏩ Avançar</button>";
+            }
+            
+            // Botão de Troca de Modo Rápida
+            actionBtns += "<button onclick=\"openSwitchModeModal(" + channel.id + ")\" title=\"Mudar Modo Rápido\" style=\"background:#6366f1; color:white;\">🔄 Modo</button>";
+            
+            // Assistir se ativo
+            if (channel.status !== 'offline') {
+                actionBtns += "<button class=\"btn-watch\" onclick=\"window.open('" + streamUrl + "', '_blank')\" style=\"background:#2563eb; color:white;\" title=\"Assistir\">▶ Assistir</button>";
+            }
+            
+            // Ações padrão
+            actionBtns += " " +
+                "<button class=\"btn-edit\" onclick=\"showEditChannelModal(" + channel.id + ")\" style=\"background:#d97706; color:white;\" title=\"Editar\">✏️ Editar</button> " +
+                "<button class=\"btn-logs\" onclick=\"viewLogs(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Logs\">📝 Logs</button> " +
+                "<button class=\"btn-delete\" onclick=\"deleteChannel(" + channel.id + ", '" + channel.status + "')\" title=\"Excluir\">✖ Excluir</button>";
+            
+            actionsCell.innerHTML = "<div style=\"display:flex; gap:6px; flex-wrap:wrap;\">" + actionBtns + "</div>";
         });
     } catch (err) {
         console.error('Erro ao carregar canais:', err);
@@ -334,19 +349,33 @@ function showEditChannelModal(id) {
     const channel = allChannels.find(c => c.id === id);
     if (!channel) return;
     
-    if (channel.status === 'online') {
+    if (channel.status === 'online' || channel.status === 'relay') {
         alert('Por favor, PARE o canal antes de tentar editá-lo.');
         return;
     }
 
     editingChannelId = id;
-    document.getElementById('modal-title').innerText = `Editar Canal: ${channel.name}`;
+    document.getElementById('modal-title').innerText = "Editar Canal: " + channel.name;
     document.getElementById('modal-submit-btn').innerText = 'Salvar Alterações';
     
     document.getElementById('new-channel-name').value = channel.name;
     document.getElementById('use-transcode').checked = !!channel.useTranscode;
     document.getElementById('new-channel-is18').checked = !!channel.is18;
     
+    const mode = channel.mode || 'live';
+    document.getElementById('channel-mode-select').value = mode;
+    
+    if (mode === 'relay') {
+        document.getElementById('relay-subtype-select').value = channel.relaySubtype || 'loop';
+        document.getElementById('relay-urls-input').value = (channel.relayUrls || []).join('\n');
+    } else {
+        document.getElementById('relay-subtype-select').value = 'loop';
+        document.getElementById('relay-urls-input').value = '';
+    }
+    
+    onChannelModeChange();
+    loadRelayM3UFiles();
+
     // Exibe o modal
     document.getElementById('create-channel-modal').style.display = 'flex';
     
@@ -377,9 +406,13 @@ function toggleSourceInput(event) {
 
 function hideCreateChannelModal() {
     document.getElementById('create-channel-modal').style.display = 'none';
-    document.getElementById('new-channel-name').value = ''; // Clear input
-    document.getElementById('new-channel-is18').checked = false; // Reset checkbox
-    document.getElementById('use-transcode').checked = false; // Reset checkbox
+    document.getElementById('new-channel-name').value = '';
+    document.getElementById('new-channel-is18').checked = false;
+    document.getElementById('use-transcode').checked = false;
+    document.getElementById('channel-mode-select').value = 'live';
+    document.getElementById('relay-subtype-select').value = 'loop';
+    document.getElementById('relay-urls-input').value = '';
+    document.getElementById('relay-m3u-select').value = '';
     editingChannelId = null;
     
     // Reset manual input states
@@ -388,6 +421,7 @@ function hideCreateChannelModal() {
     document.getElementById('video-source-input').style.display = 'none';
     document.getElementById('video-source-input').value = '';
     document.getElementById('toggle-source-type').innerText = 'Usar caminho absoluto manual';
+    onChannelModeChange();
 }
 
 async function loadVideoSourceOptions(selectedValue = "") {
@@ -437,18 +471,44 @@ async function loadVideoSourceOptions(selectedValue = "") {
 
 async function createOrEditChannel() {
     const channelName = document.getElementById('new-channel-name').value;
-    const selectVal = document.getElementById('video-source-select').value;
-    const inputVal = document.getElementById('video-source-input').value;
-    const sourceFolderName = isManualSource ? inputVal.trim() : selectVal;
+    const mode = document.getElementById('channel-mode-select').value;
+    
+    let sourceFolderName = '';
+    let relaySubtype = '';
+    let relayUrls = [];
+    
+    if (mode === 'live') {
+        const selectVal = document.getElementById('video-source-select').value;
+        const inputVal = document.getElementById('video-source-input').value;
+        sourceFolderName = isManualSource ? inputVal.trim() : selectVal;
+        
+        if (!channelName || !sourceFolderName) {
+            alert('Por favor, preencha todos os campos e selecione ou digite uma pasta de origem.');
+            return;
+        }
+    } else {
+        relaySubtype = document.getElementById('relay-subtype-select').value;
+        const urlsText = document.getElementById('relay-urls-input').value.trim();
+        relayUrls = urlsText.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+        
+        if (!channelName || relayUrls.length === 0) {
+            alert('Por favor, forneça o nome do canal e pelo menos uma URL de transmissão.');
+            return;
+        }
+    }
+    
     const useTranscode = document.getElementById('use-transcode').checked;
     const is18 = document.getElementById('new-channel-is18').checked;
 
-    if (!channelName || !sourceFolderName) {
-        alert('Por favor, preencha todos os campos e selecione ou digite uma pasta de origem.');
-        return;
-    }
-
-    const payload = { channelName, sourceFolderName, useTranscode, is18 };
+    const payload = { 
+        channelName, 
+        sourceFolderName, 
+        useTranscode, 
+        is18, 
+        mode, 
+        relaySubtype, 
+        relayUrls 
+    };
     let endpoint = '/api/createchannel';
 
     if (editingChannelId !== null) {
@@ -464,11 +524,11 @@ async function createOrEditChannel() {
         });
         const result = await res.json();
         if (result.status === 'success') {
-            alert(editingChannelId !== null ? `Canal atualizado com sucesso!` : `Canal "${result.channel.name}" criado com sucesso!`);
+            alert(editingChannelId !== null ? "Canal atualizado com sucesso!" : "Canal criado com sucesso!");
             hideCreateChannelModal();
-            loadAndRenderChannels(document.getElementById('search-input').value); // Refresh channel list
+            loadAndRenderChannels(document.getElementById('search-input').value);
         } else {
-            alert(`Erro: ${result.message}`);
+            alert("Erro: " + result.message);
         }
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
@@ -775,5 +835,121 @@ async function toggleVod(id) {
     } catch (err) {
         console.error('Erro ao alternar VOD:', err);
         alert('Erro ao tentar alternar o modo VOD.');
+    }
+}
+
+// --- RELAY AND SWITCH MODE CONTROLS ---
+
+function onChannelModeChange() {
+    const mode = document.getElementById('channel-mode-select').value;
+    if (mode === 'relay') {
+        document.getElementById('local-folder-section').style.display = 'none';
+        document.getElementById('relay-section').style.display = 'block';
+        document.getElementById('transcode-checkbox-container').style.display = 'none';
+    } else {
+        document.getElementById('local-folder-section').style.display = 'block';
+        document.getElementById('relay-section').style.display = 'none';
+        document.getElementById('transcode-checkbox-container').style.display = 'block';
+    }
+}
+
+async function loadRelayM3UFiles() {
+    const select = document.getElementById('relay-m3u-select');
+    try {
+        const res = await fetch('/api/relay-m3u-files');
+        const files = await res.json();
+        select.innerHTML = '<option value="">-- Selecione para importar links --</option>';
+        files.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.innerText = f;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Erro ao buscar m3u:', e);
+    }
+}
+
+async function onM3UFileSelect() {
+    const file = document.getElementById('relay-m3u-select').value;
+    if (!file) return;
+    try {
+        const res = await fetch("/api/read-m3u?file=" + encodeURIComponent(file));
+        const data = await res.json();
+        if (data.urls && data.urls.length > 0) {
+            const textarea = document.getElementById('relay-urls-input');
+            textarea.value = data.urls.join('\n');
+            alert(data.urls.length + " URLs importadas da playlist com sucesso!");
+        } else {
+            alert('Nenhuma URL encontrada na playlist.');
+        }
+    } catch (e) {
+        alert('Erro ao carregar a playlist.');
+    }
+}
+
+async function advanceRelay(id) {
+    try {
+        const res = await fetch('/api/relay-advance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const result = await res.json();
+        if (result.status === 'success') {
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        } else {
+            alert('Erro ao avançar vídeo.');
+        }
+    } catch (e) {
+        alert('Erro de conexão ao avançar.');
+    }
+}
+
+let switchModeChannelId = null;
+
+function openSwitchModeModal(id) {
+    const channel = allChannels.find(c => c.id === id);
+    if (!channel) return;
+    switchModeChannelId = id;
+    document.getElementById('switch-mode-channel-name').innerText = "Canal: " + channel.name;
+    
+    let currentVal = 'offline';
+    if (channel.status === 'vod') {
+        currentVal = 'vod';
+    } else if (channel.status === 'relay') {
+        currentVal = channel.relaySubtype === 'sync' ? 'relay-sync' : 'relay-loop';
+    } else if (channel.status === 'online') {
+        currentVal = 'live';
+    }
+    
+    document.getElementById('fast-mode-select').value = currentVal;
+    document.getElementById('switch-mode-modal').style.display = 'flex';
+}
+
+function hideSwitchModeModal() {
+    document.getElementById('switch-mode-modal').style.display = 'none';
+    switchModeChannelId = null;
+}
+
+async function submitSwitchMode() {
+    if (switchModeChannelId === null) return;
+    const newMode = document.getElementById('fast-mode-select').value;
+    try {
+        const res = await fetch('/api/switch-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: switchModeChannelId, newMode })
+        });
+        const result = await res.json();
+        if (result.status === 'success') {
+            hideSwitchModeModal();
+            updateStats();
+            loadAndRenderChannels(document.getElementById('search-input').value);
+        } else {
+            alert("Erro: " + result.message);
+        }
+    } catch (e) {
+        alert('Erro ao alternar modo no servidor.');
     }
 }

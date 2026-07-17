@@ -203,40 +203,87 @@
 
     </div>
 
-    <!-- Modal para Criar Canal -->
-    <div id="create-channel-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:1000;">
-        <div style="background:var(--card); padding:30px; border-radius:12px; width:400px; max-width: 90%;">
-            <h2 id="modal-title">Criar Novo Canal</h2>
-            <label for="new-channel-name" style="display:block; margin-bottom:5px; color:var(--text);">Nome do Canal:</label>
-            <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h" style="width:calc(100% - 18px); padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+    <!-- Modal para Criar/Editar Canal -->
+    <div id="create-channel-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); justify-content:center; align-items:center; z-index:1000; backdrop-filter: blur(4px);">
+        <div style="background:var(--card); padding:30px; border-radius:12px; width:450px; max-width: 90%; border: 1px solid #30363d; box-shadow: 0 8px 32px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto;">
+            <h2 id="modal-title" style="margin-top: 0; color: #58a6ff;">Criar Novo Canal</h2>
+            
+            <label for="new-channel-name" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Nome do Canal:</label>
+            <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h" style="width:calc(100% - 18px); padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
 
-            <label for="video-source-select" style="display:block; margin-bottom:5px; color:var(--text);">Pasta de Vídeos Fonte:</label>
-            <div id="video-source-container" style="margin-bottom: 20px;">
-                <select id="video-source-select" style="width:100%; padding:8px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                    <option value="">Carregando...</option>
-                    <!-- Options will be loaded here by JavaScript -->
-                </select>
-                <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none; width:calc(100% - 18px); padding:8px; border-radius:4px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                <div style="margin-top: 5px; text-align: right;">
-                    <a href="#" id="toggle-source-type" style="color: #58a6ff; font-size: 0.85em; text-decoration: none;" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+            <label for="channel-mode-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Modo de Transmissão:</label>
+            <select id="channel-mode-select" onchange="onChannelModeChange()" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-weight: bold;">
+                <option value="live">📁 Pasta Local (Ao Vivo / MP4s)</option>
+                <option value="relay">📡 Retransmissão (Links Externos / Relay)</option>
+            </select>
+
+            <!-- Seção Pasta Local -->
+            <div id="local-folder-section">
+                <label for="video-source-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Pasta de Vídeos Fonte:</label>
+                <div id="video-source-container" style="margin-bottom: 15px;">
+                    <select id="video-source-select" style="width:100%; padding:10px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                        <option value="">Carregando...</option>
+                    </select>
+                    <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none; width:calc(100% - 18px); padding:10px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                    <div style="margin-top: 5px; text-align: right;">
+                        <a href="#" id="toggle-source-type" style="color: #58a6ff; font-size: 0.85em; text-decoration: none;" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+                    </div>
                 </div>
             </div>
-            <p style="font-size:0.8em; color:#8b949e; margin-top:-10px; margin-bottom:20px;">
-                A pasta selecionada deve conter arquivos de vídeo compatíveis ou index.m3u8 para HLS.
-            </p>
 
-            <div style="margin-bottom: 20px;">
+            <!-- Seção Relay -->
+            <div id="relay-section" style="display:none;">
+                <label for="relay-subtype-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Tipo de Relay:</label>
+                <select id="relay-subtype-select" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                    <option value="loop">🔄 Fila de Vídeos (Node Loop - Baixo CPU/Zero Disk)</option>
+                    <option value="sync">⚡ Retransmissão Sincronizada (FFmpeg Sync)</option>
+                </select>
+
+                <label for="relay-m3u-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Importar Playlist M3U (VPS /home/drmpremium):</label>
+                <select id="relay-m3u-select" onchange="onM3UFileSelect()" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
+                    <option value="">-- Selecione para importar links --</option>
+                </select>
+
+                <label for="relay-urls-input" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Links de Transmissão (Um por linha):</label>
+                <textarea id="relay-urls-input" placeholder="http://exemplo.com/video1.mp4&#10;http://exemplo.com/video2.mp4" style="width:calc(100% - 18px); height:120px; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-family: monospace; font-size: 0.85em; resize: vertical;"></textarea>
+            </div>
+
+            <div style="margin-bottom: 15px;" id="transcode-checkbox-container">
                 <input type="checkbox" id="use-transcode">
-                <label for="use-transcode" style="color:var(--text); font-size:0.9em;">Ativar Transcodificação (Maior Estabilidade)</label>
+                <label for="use-transcode" style="color:var(--text); font-size:0.9em; cursor: pointer;">Ativar Transcodificação (Maior Estabilidade)</label>
             </div>
 
             <div style="margin-bottom: 20px;">
                 <input type="checkbox" id="new-channel-is18">
-                <label for="new-channel-is18" style="color:var(--text); font-size:0.9em; font-weight: bold;">🔞 Conteúdo +18 (Adulto)</label>
+                <label for="new-channel-is18" style="color:var(--text); font-size:0.9em; font-weight: bold; cursor: pointer;">🔞 Conteúdo +18 (Adulto)</label>
             </div>
 
-            <button id="modal-submit-btn" onclick="createOrEditChannel()">Criar Canal</button>
-            <button onclick="hideCreateChannelModal()" style="background:#555; margin-left:10px;">Cancelar</button>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="modal-submit-btn" onclick="createOrEditChannel()" style="background:#1f6feb; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Criar Canal</button>
+                <button onclick="hideCreateChannelModal()" style="background:#30363d; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Mudar de Modo Rápido -->
+    <div id="switch-mode-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); justify-content:center; align-items:center; z-index:1000; backdrop-filter: blur(4px);">
+        <div style="background:var(--card); padding:30px; border-radius:12px; width:350px; max-width: 90%; border: 1px solid #30363d; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+            <h2 style="margin-top: 0; color: #58a6ff; font-size: 1.3rem;">Alterar Modo do Canal</h2>
+            <p id="switch-mode-channel-name" style="color:#8b949e; margin-bottom: 20px; font-weight: bold;"></p>
+            
+            <label for="fast-mode-select" style="display:block; margin-bottom:8px; color:var(--text); font-weight: bold;">Selecione o Novo Modo:</label>
+            <select id="fast-mode-select" style="width:100%; padding:10px; margin-bottom:25px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-weight: bold;">
+                <option value="offline">⏹ Desativado (Offline)</option>
+                <option value="live">📺 Ao Vivo (Pasta Local)</option>
+                <option value="vod">🎥 VOD Estático (Playlist HLS)</option>
+                <option value="relay-loop">🔄 Relay Loop (Sem CPU / Fila)</option>
+                <option value="relay-sync">⚡ Relay Sync (FFmpeg)</option>
+            </select>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="submitSwitchMode()" style="background:#1f6feb; color:white; padding:10px 20px; border-radius:6px; font-weight: bold; cursor: pointer;">Salvar</button>
+                <button onclick="hideSwitchModeModal()" style="background:#30363d; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Cancelar</button>
+            </div>
         </div>
     </div>
 

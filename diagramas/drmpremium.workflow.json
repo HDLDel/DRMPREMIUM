@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "DRMPREMIUM — Fluxo de Inicialização de Canal",
+    "subtitle": "Do clique ao HLS ativo",
+    "output": "drmpremium-workflow.html"
+  },
+  "lanes": [
+    { "id": "admin", "label": "Admin" },
+    { "id": "server", "label": "Node.js" },
+    { "id": "ffmpeg_lane", "label": "FFmpeg" },
+    { "id": "errors", "label": "Erros", "variant": "exception" }
+  ],
+  "nodes": [
+    { "id": "click", "lane": "admin", "col": 0, "type": "frontend", "label": "Start" },
+    { "id": "receive", "lane": "server", "col": 0, "type": "backend", "label": "/api/start" },
+    { "id": "validate", "lane": "server", "col": 2, "type": "backend", "label": "Validar" },
+    { "id": "playlist", "lane": "server", "col": 3, "type": "backend", "label": "Playlist" },
+    { "id": "spawn", "lane": "server", "col": 5, "type": "backend", "label": "Spawn" },
+    { "id": "ffmpeg_run", "lane": "ffmpeg_lane", "col": 5, "type": "backend", "label": "Transmitindo" },
+    { "id": "no_video", "lane": "errors", "col": 2, "type": "security", "label": "Vazio", "tag": "blocking" },
+    { "id": "crash", "lane": "errors", "col": 3, "type": "security", "label": "Crash", "tag": "blocking" }
+  ],
+  "edges": [
+    { "from": "click", "to": "receive", "fromSide": "bottom", "toSide": "top" },
+    { "from": "receive", "to": "validate" },
+    { "from": "validate", "to": "no_video", "label": "0", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelDy": 24 },
+    { "from": "validate", "to": "playlist", "label": "OK" },
+    { "from": "playlist", "to": "spawn" },
+    { "from": "spawn", "to": "ffmpeg_run", "fromSide": "bottom", "toSide": "top" },
+    { "from": "ffmpeg_run", "to": "crash", "label": "exit != 0", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Etapas",
+      "items": ["Scan + ffprobe validate", "Gera playlist.txt", "FFmpeg spawn HLS"]
+    }
+  ]
+}
