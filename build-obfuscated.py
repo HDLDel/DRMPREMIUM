@@ -154,6 +154,8 @@ def minify_css(content):
     content = re.sub(r'\s*([\{\}:;,])\s*', r'\1', content)
     return content.strip()
 
+import base64
+
 def minify_html(content):
     # Remove HTML comments
     content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
@@ -161,7 +163,11 @@ def minify_html(content):
     content = re.sub(r'\s+', ' ', content)
     # Remove spaces between tags
     content = re.sub(r'>\s+<', '><', content)
-    return content.strip()
+    minified = content.strip()
+    
+    # Base64 encode to completely obfuscate HTML structure from view source
+    encoded = base64.b64encode(minified.encode('utf-8')).decode('utf-8')
+    return f'<!DOCTYPE html><html><head><meta charset="utf-8"><script>document.write(decodeURIComponent(escape(atob("{encoded}"))));</script></head><body></body></html>'
 
 def minify_files():
     for f in MINIFY:
