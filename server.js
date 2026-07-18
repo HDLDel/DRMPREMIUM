@@ -307,6 +307,9 @@ function clearRelayLoopTimer(id) {
     }
 }
 
+
+
+
 function scheduleRelayLoop(channel) {
     clearRelayLoopTimer(channel.id);
     const urls = channel.relayUrlProbed || channel.relayUrls;
@@ -319,7 +322,8 @@ function scheduleRelayLoop(channel) {
     const timer = setTimeout(() => {
         const ch = channels.find(c => c.id === channel.id && c.status === 'relay');
         if (!ch || ch.relaySubtype !== 'loop') return;
-        ch.currentUrlIndex = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
+        const nextIdx = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
+        ch.currentUrlIndex = nextIdx;
         saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
         console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
         scheduleRelayLoop(ch);
@@ -604,7 +608,7 @@ async function getSystemStats() {
         disco: disco,
         rede: rede,
         uptime: Math.floor(os.uptime()),
-        activeStreams: activeStreams.size,
+        activeStreams: channels.filter(c => c.status === 'online' || c.status === 'relay').length,
         disks: disksInfo,
         nocache: nocacheEnabled
     };
@@ -896,8 +900,8 @@ const server = http.createServer(async (req, res) => {
         return res.end(m3uContent);
     }
 
-    // Redireciona para login se não estiver autenticado
-    if (!isAuth && url.pathname !== '/login.html' && !url.pathname.includes('.css')) {
+    // Redirect to login if not authenticated, except for login page, CSS, and channel relay paths
+    if (!isAuth && !(url.pathname === '/login.html' || url.pathname.includes('.css') || url.pathname.startsWith('/canais/'))) {
         res.writeHead(302, { 'Location': '/login.html' });
         return res.end();
     }
@@ -969,7 +973,7 @@ const server = http.createServer(async (req, res) => {
         const channelsWithUptime = channels.map(c => {
             return {
                 ...c,
-                uptime: (c.status === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
+                uptime: ((c.status === 'online' || c.status === 'relay') && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
             };
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1531,7 +1535,8 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400);
                 return res.end(JSON.stringify({ status: 'error', message: 'Canal não possui múltiplas URLs.' }));
             }
-            channel.currentUrlIndex = ((channel.currentUrlIndex || 0) + 1) % urls.length;
+            const nextIdx = ((channel.currentUrlIndex || 0) + 1) % urls.length;
+            channel.currentUrlIndex = nextIdx;
             await saveChannels();
             scheduleRelayLoop(channel);
             console.log("[RELAY LOOP] Canal " + channel.id + " avançado manualmente para posição " + channel.currentUrlIndex);
@@ -1918,17 +1923,39 @@ const server = http.createServer(async (req, res) => {
             const urlsLen = urls.length;
 
             if (requestedFile === 'index.m3u8') {
-                // Gera M3U playlist (não HLS) com URLs proxy, começando da posição atual
+                // Gera playlist HLS Virtual de alta compatibilidade com #EXT-X-DISCONTINUITY
                 const startIdx = channel.currentUrlIndex || 0;
                 const durations = channel.relayUrlDurations || [];
-                const chName = channel.name || 'Canal';
+                
+                // Calcula o target duration (maior duração entre os vídeos, ou padrão 7200)
+                let maxDur = 7200;
+                if (durations.length > 0) {
+                    maxDur = Math.ceil(Math.max(...durations.filter(d => d > 0)));
+                }
+                
                 let lines = '#EXTM3U\n';
+                lines += '#EXT-X-VERSION:3\n';
+                lines += '#EXT-X-PLAYLIST-TYPE:VOD\n';
+                lines += `#EXT-X-TARGETDURATION:${maxDur}\n`;
+                lines += `#EXT-X-MEDIA-SEQUENCE:0\n`;
+                
+                const host = req.headers.host || 'localhost';
+                const protocol = req.socket.encrypted ? 'https' : 'http';
+                
                 for (let i = 0; i < urlsLen; i++) {
                     const idx = (startIdx + i) % urlsLen;
-                    const dur = durations[idx] ? durations[idx].toFixed(1) : '-1';
-                    lines += "#EXTINF:" + dur + "," + chName + "\n/canais/" + channelId + "/" + idx + "\n";
+                    const dur = durations[idx] ? durations[idx].toFixed(6) : '3600.000000';
+                    
+                    lines += '#EXT-X-DISCONTINUITY\n';
+                    lines += `#EXTINF:${dur},\n`;
+                    lines += `${protocol}://${host}/canais/${channelId}/${idx}.ts\n`;
                 }
-                res.writeHead(200, { 'Content-Type': 'audio/x-mpegurl' });
+                
+                res.writeHead(200, { 
+                    'Content-Type': 'application/vnd.apple.mpegurl',
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate'
+                });
                 return res.end(lines);
             }
 
@@ -1943,21 +1970,30 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(404);
                 return res.end('URL de destino vazia');
             }
-            const mod = targetUrl.startsWith('https') ? https : http;
-            mod.get(targetUrl, (proxyRes) => {
-                const statusCode = proxyRes.statusCode || 502;
-                if (statusCode !== 200) {
-                    res.writeHead(statusCode);
-                    return res.end();
-                }
-                const ctype = proxyRes.headers['content-type'] || 'video/mp4';
-                res.writeHead(200, { 'Content-Type': ctype });
-                proxyRes.pipe(res);
-            }).on('error', (e) => {
-                console.error("[RELAY LOOP] Erro ao buscar URL " + idx + ": " + e.message);
-                res.writeHead(502);
-                res.end('Bad Gateway');
+            // Transmux MP4 → MPEG-TS on-the-fly (sem re-encode, só muda o container)
+            const ffmpeg = spawn(FFMPEG_PATH, [
+                '-i', targetUrl,
+                '-c', 'copy',
+                '-f', 'mpegts',
+                '-'
+            ]);
+            let stderrLog = '';
+            ffmpeg.stderr.on('data', d => stderrLog += d);
+            ffmpeg.on('error', (e) => {
+                console.error("[RELAY LOOP] Erro FFmpeg URL " + idx + ": " + e.message);
+                if (!res.headersSent) { res.writeHead(502); res.end('Transmux error'); }
             });
+            ffmpeg.on('close', (code) => {
+                if (code !== 0 && !res.headersSent) {
+                    console.error("[RELAY LOOP] FFmpeg exit " + code + " URL " + idx + ": " + stderrLog.slice(-300));
+                    res.writeHead(502); res.end('Transmux failed');
+                }
+            });
+            res.writeHead(200, {
+                'Content-Type': 'video/MP2T',
+                'Access-Control-Allow-Origin': '*'
+            });
+            ffmpeg.stdout.pipe(res);
             return;
         }
     }
