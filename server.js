@@ -690,8 +690,26 @@ async function startChannel(id) {
         playlistPath = path.join(outputDir, 'playlist.txt');
     }
 
+    // Relay-sync: probeia URLs, filtra válidas, gera playlist (evita URL morta travar o FFmpeg)
     if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
-        playlistPath = path.join(outputDir, 'playlist_urls.txt');
+        const urls = channel.relayUrls || [];
+        if (urls.length > 0) {
+            console.log(`[RELAY SYNC ${id}] Probeando ${urls.length} URLs...`);
+            const results = await Promise.all(urls.map(u => probeUrlDuration(u)));
+            const validUrls = urls.filter((_, i) => results[i] !== null);
+            if (validUrls.length === 0) {
+                const errMsg = `[ERRO RELAY SYNC ${id}] Nenhuma URL válida encontrada`;
+                console.error(errMsg);
+                return { status: 'error', message: errMsg };
+            }
+            console.log(`[RELAY SYNC ${id}] ${validUrls.length}/${urls.length} URLs válidas`);
+            const plContent = validUrls.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+            const plPath = path.join(outputDir, 'playlist_urls.txt');
+            fs.writeFileSync(plPath, plContent);
+            playlistPath = plPath;
+        } else {
+            playlistPath = path.join(outputDir, 'playlist_urls.txt');
+        }
     }
 
     // Flags de estabilidade idênticas ao sistema PHP anterior
@@ -1380,7 +1398,12 @@ const server = http.createServer(async (req, res) => {
         for (let i = 0; i < offlineChannels.length; i += BATCH_SIZE) {
             const batch = offlineChannels.slice(i, i + BATCH_SIZE);
             console.log(`[STARTALL] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
-            const results = await Promise.all(batch.map(ch => startChannel(ch.id)));
+            const results = await Promise.all(batch.map(ch => {
+                if (ch.mode === 'relay' && ch.relaySubtype === 'loop') {
+                    return startRelayLoop(ch);
+                }
+                return startChannel(ch.id);
+            }));
             for (const result of results) {
                 if (result.status === 'success') {
                     started.push(result.name || 'unknown');
@@ -1884,7 +1907,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ totalIPs, totalRequests, topChannels }));
     }
 
-    // Relay Proxy Handler: proxy externo para canais em modo relay-loop / local HLS para relay-sync
+    // Handler de /canais/: relay, live ou VOD
     const relayMatch = url.pathname.match(/^\/canais\/(\d+)\/(.+)$/);
     if (relayMatch) {
         const channelId = parseInt(relayMatch[1]);
@@ -1942,7 +1965,7 @@ const server = http.createServer(async (req, res) => {
                 const host = req.headers.host || 'localhost';
                 const protocol = req.socket.encrypted ? 'https' : 'http';
                 
-                for (let i = 0; i < urlsLen; i++) {
+                for (let i = 0; i < urlsLen * 100; i++) {
                     const idx = (startIdx + i) % urlsLen;
                     const dur = durations[idx] ? durations[idx].toFixed(6) : '3600.000000';
                     
@@ -1996,6 +2019,25 @@ const server = http.createServer(async (req, res) => {
             ffmpeg.stdout.pipe(res);
             return;
         }
+
+        // Não é relay → tenta servir do filesystem (live / VOD)
+        const vodFlag = "/home/drmpremium/.vod_" + channelId;
+        const hlsBase = fs.existsSync(vodFlag)
+            ? "/home/drmpremium/hls_pronto"
+            : "/dev/shm/iptv_canais";
+        const filePath = path.join(hlsBase, channelId.toString(), requestedFile);
+        if (fs.existsSync(filePath)) {
+            const ext = path.extname(filePath);
+            const types = { '.ts': 'video/MP2T', '.m3u8': 'application/vnd.apple.mpegurl' };
+            res.writeHead(200, {
+                'Content-Type': types[ext] || 'application/octet-stream',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache'
+            });
+            return fs.createReadStream(filePath).pipe(res);
+        }
+        res.writeHead(404);
+        return res.end('Arquivo não encontrado');
     }
 
     // Servir Arquivos Estáticos (Dashboard)
@@ -2040,7 +2082,7 @@ const server = http.createServer(async (req, res) => {
 setInterval(() => {
     activeStreams.forEach(async (info, id) => {
         const channel = channels.find(c => c.id === id);
-        if (!channel || channel.status !== 'online') return;
+        if (!channel || (channel.status !== 'online' && channel.status !== 'relay')) return;
 
         const m3u8Path = path.join(CHANNELS_DIR, id.toString(), 'index.m3u8');
         
@@ -2072,6 +2114,22 @@ setInterval(() => {
             }
         }
     });
+
+    // Relay Guardian: revive relay-sync channels offline ou sem processo ativo
+    for (const channel of channels) {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
+            const isAlive = activeStreams.has(channel.id);
+            if (!isAlive && channel.status !== 'offline') {
+                console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) sem FFmpeg ativo (status=${channel.status}). Corrigindo...`);
+                channel.status = 'offline';
+            }
+            if (channel.status === 'offline') {
+                console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) offline. Reiniciando relay-sync...`);
+                channel.status = 'relay';
+                setTimeout(async () => await startChannel(channel.id), 2000);
+            }
+        }
+    }
 }, 15000);
 
 /**
@@ -2188,20 +2246,26 @@ setTimeout(parseNginxAccessLog, 5000);
          }));
      }
 
-     // Auto-start de canais Relay Loop
-     for (const channel of channels) {
-         if (channel.status === 'relay') {
-             const relayFlag = "/home/drmpremium/.relay_" + channel.id;
-             if (!fs.existsSync(relayFlag)) {
-                 fs.writeFileSync(relayFlag, '');
-                 console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ")");
-             }
-             if (channel.relaySubtype === 'loop') {
-                 console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
-                 startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
-             }
-         }
-     }
+    // Auto-start de canais Relay Loop
+    for (const channel of channels) {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'loop') {
+            channel.status = 'relay';
+            const relayFlag = "/home/drmpremium/.relay_" + channel.id;
+            if (!fs.existsSync(relayFlag)) {
+                fs.writeFileSync(relayFlag, '');
+                console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ")");
+            }
+            console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
+            startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
+        }
+    }
+    // Cria flag para relay-sync que ainda nao tem flag
+    for (const channel of channels) {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'sync' && !fs.existsSync("/home/drmpremium/.relay_" + channel.id)) {
+            fs.writeFileSync("/home/drmpremium/.relay_" + channel.id, '');
+            console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ") (sync)");
+        }
+    }
 
     // Cria flag files para canais em modo VOD (nginx check)
     for (const channel of channels) {
