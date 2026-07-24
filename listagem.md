@@ -1,1 +1,0 @@
-/home/drmpremium/Dev/listagem.md
