@@ -15,11 +15,10 @@ MINIFY = ['index.html', 'login.html', 'style.css']
 
 STATIC = [
     'package.json', 'package-lock.json',
-    'channels.json', 'nginx_iptv.conf',
-    'readme.md', 'README.md',
+    'nginx_iptv.conf',
 ]
 
-COPY_DIRS = ['node_modules']
+COPY_DIRS = []
 
 EXCLUDE = {
     '.git', '.agents', 'logs', '24HORAS', 'canais',

@@ -631,11 +631,18 @@ async function startChannel(id) {
     const outputDir = path.join(CHANNELS_DIR, id.toString());
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-    // Limpa arquivos antigos para o Watchdog não se confundir com timestamps do passado
-    const m3u8Path = path.join(outputDir, 'index.m3u8');
-    if (fs.existsSync(m3u8Path)) {
-        try { fs.unlinkSync(m3u8Path); } catch(e) {}
-    }
+    // Limpa todo estado anterior: segments órfãos, m3u8 e .tmp
+    let cleaned = 0;
+    try {
+        const files = fs.readdirSync(outputDir);
+        for (const f of files) {
+            if (f.endsWith('.ts') || f.endsWith('.m3u8') || f.endsWith('.tmp')) {
+                fs.unlinkSync(path.join(outputDir, f));
+                cleaned++;
+            }
+        }
+    } catch (e) {}
+    if (cleaned > 0) console.log(`[CANAL ${id}] ${cleaned} arquivos antigos limpos do tmpfs`);
 
     let playlistPath = channel.playlistFilePath;
 
@@ -754,7 +761,7 @@ async function startChannel(id) {
         '-flags', '+global_header',   // Melhora compatibilidade de troca de stream
         '-avoid_negative_ts', 'make_zero',
         '-f', 'hls', '-hls_time', '15', '-hls_list_size', '10',
-        '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
+        '-hls_flags', 'delete_segments+omit_endlist+independent_segments',
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
         path.join(outputDir, 'index.m3u8')
     );
