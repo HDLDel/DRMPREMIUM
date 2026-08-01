@@ -42,8 +42,8 @@ echo "  → /etc/modules-load.d/bbr.conf criado"
 
 # ─── Ring buffer da NIC ───
 if ethtool eno1 >/dev/null 2>&1; then
-  ethtool -G eno1 rx 8192 tx 8192
-  echo "  → Ring buffer eno1: RX=8192 TX=8192"
+  ethtool -G eno1 rx 8192 tx 8192 2>/dev/null || ethtool -G eno1 rx 4096 tx 4096 2>/dev/null || true
+  echo "  Ring buffer eno1 configurado (ou mantido limite da placa)"
 else
   echo "  → NIC eno1 não encontrada, ring buffer ignorado"
 fi

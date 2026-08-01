@@ -14,6 +14,12 @@ APP_USER="drmpremium"
 # VALIDAÇÃO PRÉVIA — todos os arquivos exigidos
 # ═══════════════════════════════════════════════
 
+# Se channels.json não existir, cria um banco de canais inicial vazio
+if [ ! -f "$PROJDIR/channels.json" ]; then
+  echo "[]" > "$PROJDIR/channels.json"
+  echo "  Criado channels.json inicial (vazio)"
+fi
+
 REQUIRED_FILES=(
   server.js
   index.html
@@ -21,7 +27,6 @@ REQUIRED_FILES=(
   script.js
   style.css
   package.json
-  channels.json
   nginx_iptv.conf
 )
 
@@ -161,8 +166,8 @@ echo "  bbr module configurado"
 
 # Ring buffer da NIC
 if ethtool eno1 >/dev/null 2>&1; then
-  ethtool -G eno1 rx 8192 tx 8192
-  echo "  Ring buffer eno1: RX=8192 TX=8192"
+  ethtool -G eno1 rx 8192 tx 8192 2>/dev/null || ethtool -G eno1 rx 4096 tx 4096 2>/dev/null || true
+  echo "  Ring buffer eno1 configurado (ou mantido limite da placa)"
 else
   echo "  NIC eno1 não encontrada, ring buffer ignorado"
 fi

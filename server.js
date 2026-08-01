@@ -71,19 +71,77 @@ function loadBlockedIPs() {
 }
 loadBlockedIPs();
 // Gera o arquivo de configuração do nginx na inicialização
-saveBlockedIPs();
-
 function saveBlockedIPs() {
     try {
         fs.writeFileSync(BLOCKED_IPS_FILE, JSON.stringify([...blockedIPs], null, 2));
         // Gera conf do nginx
-        const conf = blockedIPs.size > 0
+        const conf = blockedIPs.size > 0 
             ? [...blockedIPs].map(ip => `deny ${ip};`).join('\n') + '\n'
-            : '# nenhum IP bloqueado\n';
+            : '';
         fs.writeFileSync('/etc/nginx/blocked_ips.conf', conf);
+        // Reload nginx sem derrubar conexões ativas
         execSync('nginx -s reload 2>/dev/null', { stdio: 'ignore' });
     } catch (e) {
         console.error('[SEGURANÇA] Erro ao salvar IPs bloqueados:', e.message);
+    }
+}
+
+// Funções auxiliares para manipulação flexível de flags (suporta /home/drmpremium e a pasta da aplicação)
+function getRelayFlagPaths(channelId) {
+    return [
+        path.join(__dirname, `.relay_${channelId}`),
+        `/home/drmpremium/.relay_${channelId}`
+    ];
+}
+
+function hasRelayFlag(channelId) {
+    return getRelayFlagPaths(channelId).some(p => fs.existsSync(p));
+}
+
+function setRelayFlag(channelId) {
+    for (const p of getRelayFlagPaths(channelId)) {
+        try {
+            const dir = path.dirname(p);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(p, '');
+        } catch (e) {}
+    }
+}
+
+function removeRelayFlag(channelId) {
+    for (const p of getRelayFlagPaths(channelId)) {
+        try {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+        } catch (e) {}
+    }
+}
+
+function getVodFlagPaths(channelId) {
+    return [
+        path.join(__dirname, `.vod_${channelId}`),
+        `/home/drmpremium/.vod_${channelId}`
+    ];
+}
+
+function hasVodFlag(channelId) {
+    return getVodFlagPaths(channelId).some(p => fs.existsSync(p));
+}
+
+function setVodFlag(channelId) {
+    for (const p of getVodFlagPaths(channelId)) {
+        try {
+            const dir = path.dirname(p);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(p, '');
+        } catch (e) {}
+    }
+}
+
+function removeVodFlag(channelId) {
+    for (const p of getVodFlagPaths(channelId)) {
+        try {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+        } catch (e) {}
     }
 }
 
@@ -354,8 +412,7 @@ async function startRelayLoop(channel) {
     if (channel.currentUrlIndex === undefined || channel.currentUrlIndex >= probed.length) {
         channel.currentUrlIndex = 0;
     }
-    const relayFlag = "/home/drmpremium/.relay_" + channel.id;
-    fs.writeFileSync(relayFlag, '');
+    setRelayFlag(channel.id);
     channel.status = 'relay';
     channel.startedAt = Date.now();
     await saveChannels();
@@ -623,8 +680,7 @@ async function startChannel(id) {
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
     if (channel.mode === 'relay') {
-        const relayFlag = "/home/drmpremium/.relay_" + id;
-        fs.writeFileSync(relayFlag, '');
+        setRelayFlag(id);
         console.log("[RELAY FLAG] Flag criada para canal " + id + " (sync)");
     }
 
@@ -783,8 +839,7 @@ async function startChannel(id) {
         if (ch) {
             ch.status = 'offline';
             delete ch.startedAt;
-            const relayFlag = "/home/drmpremium/.relay_" + id;
-            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
+            removeRelayFlag(id);
             saveChannels();
         }
         activeStreams.delete(id);
@@ -814,8 +869,7 @@ async function startChannel(id) {
         if (ch && (ch.status === 'online' || ch.status === 'relay')) {
             ch.status = 'offline';
             delete ch.startedAt;
-            const relayFlag = "/home/drmpremium/.relay_" + id;
-            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
+            removeRelayFlag(id);
             saveChannels();
         }
     });
@@ -840,17 +894,18 @@ const server = http.createServer(async (req, res) => {
     try {
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
-    const clientIP = req.socket?.remoteAddress || '';
-    const isLocal = clientIP === '127.0.0.1' || clientIP === '::1' || clientIP.endsWith('127.0.0.1');
-    const cookies = getCookies(req);
-    const isAuth = cookies['session_token'] === SESSION_ID || isLocal;
-
     // Helper para obter IP real do cliente (trata proxy reverso)
     function getClientIP(req) {
         const fwd = req.headers['x-forwarded-for'];
         if (fwd) return fwd.split(',')[0].trim();
+        const real = req.headers['x-real-ip'];
+        if (real) return real.trim();
         return req.socket?.remoteAddress || 'unknown';
     }
+
+    // Autenticação Estrita via Cookie de Sessão (Zero Bypass de IP)
+    const cookies = getCookies(req);
+    const isAuth = cookies['session_token'] === SESSION_ID;
 
     // Rota pública de login
     if (url.pathname === '/api/login' && req.method === 'POST') {
@@ -883,14 +938,14 @@ const server = http.createServer(async (req, res) => {
             if (success) {
                 console.log(`[AUTH] Sucesso: Login realizado por ${cleanUser} (${clientIP})`);
                 res.writeHead(200, { 
-                    'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly`,
+                    'Set-Cookie': `session_token=${SESSION_ID}; Path=/; HttpOnly; SameSite=Lax`,
                     'Content-Type': 'application/json' 
                 });
                 res.end(JSON.stringify({ status: 'success' }));
             } else {
                 console.log(`[AUTH] Falha: ${cleanUser || 'IP '+clientIP}`);
-                res.writeHead(401);
-                res.end(JSON.stringify({ status: 'error' }));
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Usuário ou senha inválidos' }));
             }
         });
         return;
@@ -925,8 +980,12 @@ const server = http.createServer(async (req, res) => {
         return res.end(m3uContent);
     }
 
-    // Redirect to login if not authenticated, except for login page, CSS, and channel relay paths
+    // Bloqueio Global: Se não autenticado por Cookie de Sessão, nega acesso (Redireciona páginas para /login.html e bloqueia APIs com 401)
     if (!isAuth && !(url.pathname === '/login.html' || url.pathname.includes('.css') || url.pathname.startsWith('/canais/'))) {
+        if (url.pathname.startsWith('/api/')) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'error', message: 'Sessão inválida ou expirada. Faça login novamente.' }));
+        }
         res.writeHead(302, { 'Location': '/login.html' });
         return res.end();
     }
@@ -1342,10 +1401,8 @@ const server = http.createServer(async (req, res) => {
             const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
 
             // Limpa flags VOD e Relay
-            const vodFlag = "/home/drmpremium/.vod_" + id;
-            const relayFlag = "/home/drmpremium/.relay_" + id;
-            try { if (fs.existsSync(vodFlag)) fs.unlinkSync(vodFlag); } catch (e) {}
-            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
+            removeVodFlag(id);
+            removeRelayFlag(id);
 
             // Aumentamos o tempo para 1 segundo para garantir que o FFmpeg soltou os arquivos
             setTimeout(() => {
@@ -1382,11 +1439,8 @@ const server = http.createServer(async (req, res) => {
             clearRelayLoopTimer(id);
 
             // Relay: remove flag
-            const relayFlag = "/home/drmpremium/.relay_" + id;
-            if (fs.existsSync(relayFlag)) {
-                try { fs.unlinkSync(relayFlag); } catch (e) {}
-                console.log("[RELAY] Canal " + id + " desativado via stop");
-            }
+            removeRelayFlag(id);
+            console.log("[RELAY] Canal " + id + " desativado via stop");
 
             if (activeStreams.has(id)) {
                 activeStreams.get(id).process.kill('SIGKILL');
@@ -1450,10 +1504,8 @@ const server = http.createServer(async (req, res) => {
             clearRelayLoopTimer(id);
 
             // Remove flags antigas
-            const vodFlag = "/home/drmpremium/.vod_" + id;
-            const relayFlag = "/home/drmpremium/.relay_" + id;
-            try { if (fs.existsSync(vodFlag)) fs.unlinkSync(vodFlag); } catch (e) {}
-            try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
+            removeVodFlag(id);
+            removeRelayFlag(id);
 
             if (newMode === 'offline') {
                 channel.status = 'offline';
@@ -1489,7 +1541,7 @@ const server = http.createServer(async (req, res) => {
                     ]);
                     await new Promise(resolve => proc.on('close', resolve));
                 }
-                fs.writeFileSync(vodFlag, '');
+                setVodFlag(id);
                 channel.status = 'vod';
                 channel.startedAt = undefined;
                 await saveChannels();
@@ -1919,8 +1971,7 @@ const server = http.createServer(async (req, res) => {
     if (relayMatch) {
         const channelId = parseInt(relayMatch[1]);
         const requestedFile = relayMatch[2];
-        const relayFlag = "/home/drmpremium/.relay_" + channelId;
-        if (fs.existsSync(relayFlag)) {
+        if (hasRelayFlag(channelId)) {
             const channel = channels.find(c => c.id === channelId && c.mode === 'relay');
             if (!channel) {
                 res.writeHead(404);
@@ -2257,9 +2308,8 @@ setTimeout(parseNginxAccessLog, 5000);
     for (const channel of channels) {
         if (channel.mode === 'relay' && channel.relaySubtype === 'loop') {
             channel.status = 'relay';
-            const relayFlag = "/home/drmpremium/.relay_" + channel.id;
-            if (!fs.existsSync(relayFlag)) {
-                fs.writeFileSync(relayFlag, '');
+            if (!hasRelayFlag(channel.id)) {
+                setRelayFlag(channel.id);
                 console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ")");
             }
             console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
@@ -2268,8 +2318,8 @@ setTimeout(parseNginxAccessLog, 5000);
     }
     // Cria flag para relay-sync que ainda nao tem flag
     for (const channel of channels) {
-        if (channel.mode === 'relay' && channel.relaySubtype === 'sync' && !fs.existsSync("/home/drmpremium/.relay_" + channel.id)) {
-            fs.writeFileSync("/home/drmpremium/.relay_" + channel.id, '');
+        if (channel.mode === 'relay' && channel.relaySubtype === 'sync' && !hasRelayFlag(channel.id)) {
+            setRelayFlag(channel.id);
             console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ") (sync)");
         }
     }
@@ -2277,9 +2327,8 @@ setTimeout(parseNginxAccessLog, 5000);
     // Cria flag files para canais em modo VOD (nginx check)
     for (const channel of channels) {
         if (channel.status === 'vod') {
-            const flagPath = `/home/drmpremium/.vod_${channel.id}`;
-            if (!fs.existsSync(flagPath)) {
-                fs.writeFileSync(flagPath, '');
+            if (!hasVodFlag(channel.id)) {
+                setVodFlag(channel.id);
                 console.log(`[AUTO-START] Flag VOD criada para canal ${channel.id} (${channel.name})`);
             }
         }
