@@ -1023,6 +1023,31 @@ const server = http.createServer(async (req, res) => {
         return res.end("Log não encontrado.");
     }
 
+    // API: Limpar todos os logs de todos os canais
+    if (url.pathname === '/api/clear-logs' && req.method === 'POST') {
+        try {
+            if (fs.existsSync(LOGS_DIR)) {
+                const files = fs.readdirSync(LOGS_DIR);
+                let count = 0;
+                for (const f of files) {
+                    if (f.endsWith('.log')) {
+                        try {
+                            fs.writeFileSync(path.join(LOGS_DIR, f), '');
+                            count++;
+                        } catch (e) {}
+                    }
+                }
+                console.log(`[LIMPEZA] Logs de ${count} canais limpos com sucesso.`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'success', count }));
+            }
+        } catch (err) {
+            console.error('[ERRO] Falha ao limpar logs:', err.message);
+        }
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ status: 'error', message: 'Falha ao limpar logs.' }));
+    }
+
     if (url.pathname === '/api/start' && req.method === 'POST') {
         let body = ''; // Removed canalNome from startChannel call
         req.on('data', chunk => body += chunk);

@@ -1049,3 +1049,18 @@ function copyCurrentPlayerUrl() {
         copyChannelM3U(currentPlayingStreamUrl.match(/\/canais\/(\d+)\//)?.[1] || '');
     }
 }
+
+async function clearAllLogs() {
+    if (!confirm('Deseja realmente limpar e resetar os logs de erros de TODOS os canais?')) return;
+    try {
+        const res = await fetch('/api/clear-logs', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            alert(`✅ Logs limpos com sucesso!\n\n${data.count} arquivo(s) de log de canais foram esvaziados e resetados.`);
+        } else {
+            alert('Erro ao limpar logs: ' + (data.message || 'Falha no servidor'));
+        }
+    } catch (e) {
+        alert('Erro ao conectar com o servidor para limpar os logs.');
+    }
+}
