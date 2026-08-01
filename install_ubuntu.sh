@@ -110,9 +110,6 @@ if [ ! -f /etc/nginx/blocked_ips.json ]; then
   echo "  blocked_ips.json criado"
 fi
 
-chmod u+s "$(which nginx)"
-echo "  setuid nginx ativado"
-
 nginx -t
 systemctl restart nginx
 echo "  Nginx OK"
@@ -179,6 +176,15 @@ sysctl --system >/dev/null 2>&1 || true
 echo "  sysctl --system reload OK"
 
 echo "=== Ajustes de desempenho aplicados ==="
+
+# ═══════════════════════════════════════════════
+# 8.1. CONFIGURAR CRONS DO SISTEMA
+# ═══════════════════════════════════════════════
+
+if [ -f "$PROJDIR/setup_crons.sh" ]; then
+  echo "=== Configurando crons do sistema ==="
+  bash "$PROJDIR/setup_crons.sh"
+fi
 
 # ═══════════════════════════════════════════════
 # 9. INICIAR APLICAÇÃO COM PM2

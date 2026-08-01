@@ -8,12 +8,14 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+PROJDIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Copia o arquivo de configuração do Nginx para o diretório de sites-available
 echo "Copiando nginx_iptv.conf para /etc/nginx/sites-available/"
-cp nginx_iptv.conf /etc/nginx/sites-available/
+cp "$PROJDIR/nginx_iptv.conf" /etc/nginx/sites-available/
 
 # Cria um link simbólico para habilitar a configuração
-echo "Habilitando a configuração do Nginx_iptv.conf"
+echo "Habilitando a configuração do nginx_iptv.conf"
 ln -sf /etc/nginx/sites-available/nginx_iptv.conf /etc/nginx/sites-enabled/
 
 # Remove a configuração padrão do Nginx para evitar conflitos
