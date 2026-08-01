@@ -298,8 +298,24 @@
         </div>
     </div>
 
+    <!-- Modal Pop-up do Player de Vídeo -->
+    <div id="player-modal">
+        <div class="player-card">
+            <div class="player-header">
+                <h2 id="player-modal-title">📺 Reproduzindo Canal</h2>
+                <button onclick="closePlayerModal()" style="background:#ef4444; color:white; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:bold;">✖ Fechar</button>
+            </div>
+            <video id="hls-video-player" class="player-video" controls autoplay></video>
+            <div class="player-footer">
+                <span id="player-stream-url"></span>
+                <button onclick="copyCurrentPlayerUrl()" style="background:#30363d; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">📋 Copiar Link</button>
+            </div>
+        </div>
+    </div>
+
     <button id="scroll-to-top" onclick="scrollToTop()">↑</button>
 
-    <script src="script.js?v=1.0.2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="script.js?v=1.0.3"></script>
 </body>
 </html>

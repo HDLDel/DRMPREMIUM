@@ -258,12 +258,12 @@ async function loadAndRenderChannels(filter = '') {
                 actionBtns += "<button onclick=\"advanceRelay(" + channel.id + ")\" title=\"Próximo Vídeo\" style=\"background:#f59e0b; color:white;\">⏩ Avançar</button>";
             }
             
-            // Botão de Troca de Modo Rápida
-            actionBtns += "<button onclick=\"openSwitchModeModal(" + channel.id + ")\" title=\"Mudar Modo Rápido\" style=\"background:#6366f1; color:white;\">🔄 Modo</button>";
-            
-            // Assistir se ativo
+            // Botão M3U (Copiar Link M3U do Canal)
+            actionBtns += "<button class=\"btn-m3u\" onclick=\"copyChannelM3U(" + channel.id + ")\" title=\"Copiar Link M3U\">📋 M3U</button>";
+
+            // Assistir se ativo (Abre Pop-up Modal com Player HLS)
             if (channel.status !== 'offline') {
-                actionBtns += "<button class=\"btn-watch\" onclick=\"window.open('" + streamUrl + "', '_blank')\" style=\"background:#2563eb; color:white;\" title=\"Assistir\">▶ Assistir</button>";
+                actionBtns += "<button class=\"btn-watch\" onclick=\"openPlayerModal(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Assistir no Pop-up\">▶ Assistir</button>";
             }
             
             // Ações padrão
@@ -951,5 +951,101 @@ async function submitSwitchMode() {
         }
     } catch (e) {
         alert('Erro ao alternar modo no servidor.');
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// PLAYER POP-UP EMBUTIDO (HLS.JS) & COPIAR LINK M3U
+// ═════════════════════════════════════════════════════════════════
+let hlsPlayerInstance = null;
+let currentPlayingStreamUrl = '';
+
+function copyChannelM3U(channelId) {
+    const url = `${window.location.protocol}//${window.location.host}/canais/${channelId}/index.m3u8`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            alert(`✅ Link M3U do Canal ${channelId} copiado:\n\n${url}`);
+        }).catch(() => {
+            prompt(`Copie o link M3U do Canal ${channelId}:`, url);
+        });
+    } else {
+        prompt(`Copie o link M3U do Canal ${channelId}:`, url);
+    }
+}
+
+function openPlayerModal(channelId, channelName) {
+    const modal = document.getElementById('player-modal');
+    const video = document.getElementById('hls-video-player');
+    const title = document.getElementById('player-modal-title');
+    const urlLabel = document.getElementById('player-stream-url');
+    
+    currentPlayingStreamUrl = `${window.location.protocol}//${window.location.host}/canais/${channelId}/index.m3u8`;
+    
+    if (title) title.innerText = `📺 ${channelName}`;
+    if (urlLabel) urlLabel.innerText = currentPlayingStreamUrl;
+    if (modal) modal.style.display = 'flex';
+
+    // Limpa instância anterior do Hls se existir
+    if (hlsPlayerInstance) {
+        hlsPlayerInstance.destroy();
+        hlsPlayerInstance = null;
+    }
+
+    if (window.Hls && Hls.isSupported()) {
+        hlsPlayerInstance = new Hls({
+            manifestLoadingTimeOut: 15000,
+            manifestLoadingMaxRetry: 5,
+            levelLoadingTimeOut: 15000
+        });
+        hlsPlayerInstance.loadSource(currentPlayingStreamUrl);
+        hlsPlayerInstance.attachMedia(video);
+        hlsPlayerInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(e => console.log('Autoplay prevenido pelo navegador:', e));
+        });
+        hlsPlayerInstance.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+                switch (data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        console.warn('[PLAYER] Erro de rede no stream HLS, reconectando...');
+                        hlsPlayerInstance.startLoad();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        console.warn('[PLAYER] Erro de mídia no stream HLS, recuperando...');
+                        hlsPlayerInstance.recoverMediaError();
+                        break;
+                    default:
+                        console.error('[PLAYER] Erro fatal no stream HLS:', data);
+                        break;
+                }
+            }
+        });
+    } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = currentPlayingStreamUrl;
+        video.play().catch(e => console.log('Autoplay prevenido:', e));
+    } else {
+        alert('Seu navegador não possui suporte para reprodução de vídeo HLS.');
+    }
+}
+
+function closePlayerModal() {
+    const modal = document.getElementById('player-modal');
+    const video = document.getElementById('hls-video-player');
+    
+    if (video) {
+        video.pause();
+        video.src = '';
+    }
+    if (hlsPlayerInstance) {
+        hlsPlayerInstance.destroy();
+        hlsPlayerInstance = null;
+    }
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function copyCurrentPlayerUrl() {
+    if (currentPlayingStreamUrl) {
+        copyChannelM3U(currentPlayingStreamUrl.match(/\/canais\/(\d+)\//)?.[1] || '');
     }
 }
