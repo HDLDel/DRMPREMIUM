@@ -42,6 +42,15 @@ function spawnFFmpeg(args) {
     return spawn(FFMPEG_PATH, args);
 }
 
+// Detecta se a versão do FFmpeg instalada suporta -fps_mode (FFmpeg 5.1+) ou se usa -vsync (FFmpeg 4.x - Ubuntu 20.04)
+let FFMPEG_FPS_FLAG = '-vsync';
+try {
+    const vOut = execSync(`${FFMPEG_PATH} -version 2>/dev/null`).toString();
+    if (/ffmpeg version [5-9]\./i.test(vOut) || /ffmpeg version [1-9][0-9]\./i.test(vOut)) {
+        FFMPEG_FPS_FLAG = '-fps_mode';
+    }
+} catch (e) {}
+
 // Lista de Administradores com hashes seguros (bcrypt)
 const ADMINS = [
     { user: '<ADMIN_EMAIL_PLACEHOLDER>', hash: '<BCRYPT_HASH_PLACEHOLDER>' }, // <REDACTED_PASSWORD>
@@ -796,7 +805,7 @@ async function startChannel(id) {
     if (channel.useTranscode) {
         // Modo Estável: Reconstrói o stream para evitar quebras em arquivos com FPS/Codecs diferentes
         args.push(
-            '-fps_mode', 'cfr', // Força Constant Frame Rate para o transcode (necessário para -r 30)
+            FFMPEG_FPS_FLAG, 'cfr', // Força Constant Frame Rate para o transcode (necessário para -r 30)
             '-c:v', 'libx264', 
             '-preset', 'ultrafast', 
             '-tune', 'zerolatency', 
@@ -809,7 +818,7 @@ async function startChannel(id) {
         );
     } else {
         // Modo Econômico: Apenas copia os streams originais
-        args.push('-fps_mode', 'passthrough'); // Mantém timestamps originais no modo copy
+        args.push(FFMPEG_FPS_FLAG, 'passthrough'); // Mantém timestamps originais no modo copy
         args.push('-c:v', 'copy', '-c:a', 'copy');
     }
 
