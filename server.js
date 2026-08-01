@@ -374,6 +374,77 @@ function clearRelayLoopTimer(id) {
     }
 }
 
+// Grava evento de log para o canal (funciona em Relay Loop, VOD e Live)
+function logChannelEvent(channelId, message) {
+    try {
+        if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+        const logPath = path.join(LOGS_DIR, `canal_${channelId}.log`);
+        const time = new Date().toLocaleString();
+        fs.appendFileSync(logPath, `[${time}] ${message}\n`);
+    } catch (e) {}
+}
+
+function scheduleRelayLoop(channel) {
+    clearRelayLoopTimer(channel.id);
+    const urls = channel.relayUrlProbed || channel.relayUrls;
+    const durations = channel.relayUrlDurations || [];
+    if (!urls || urls.length < 2) return;
+    const idx = channel.currentUrlIndex || 0;
+    const dur = durations[idx];
+    if (!dur || dur <= 0) return;
+    console.log("[RELAY LOOP] Canal " + channel.id + " agendado: avança da posição " + idx + " em " + Math.round(dur) + "s");
+    const timer = setTimeout(() => {
+        const ch = channels.find(c => c.id === channel.id && c.status === 'relay');
+        if (!ch || ch.relaySubtype !== 'loop') return;
+        const nextIdx = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
+        ch.currentUrlIndex = nextIdx;
+        saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
+        const currentUrl = ch.relayUrlProbed[nextIdx] || '';
+        console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
+        logChannelEvent(ch.id, `[RELAY LOOP] Avançou automaticamente para o vídeo #${nextIdx + 1}/${ch.relayUrlProbed.length} (${currentUrl})`);
+        scheduleRelayLoop(ch);
+    }, dur * 1000);
+    relayLoopTimers.set(channel.id, timer);
+}
+
+async function startRelayLoop(channel) {
+    logChannelEvent(channel.id, `\n--- INICIANDO CANAL ${channel.id} (${channel.name}) [RELAY LOOP] EM ${new Date().toLocaleString()} ---`);
+    logChannelEvent(channel.id, `[RELAY LOOP] Sondando ${channel.relayUrls.length} URLs via FFprobe...`);
+    console.log("[RELAY LOOP] Probing " + channel.relayUrls.length + " URLs para canal " + channel.id + "...");
+    const results = await Promise.all(channel.relayUrls.map(u => probeUrlDuration(u)));
+    const probed = [];
+    const durations = [];
+    for (let i = 0; i < results.length; i++) {
+        if (results[i] !== null) {
+            probed.push(channel.relayUrls[i]);
+            durations.push(results[i]);
+            logChannelEvent(channel.id, `[RELAY LOOP] URL #${i + 1} OK (${Math.round(results[i])}s): ${channel.relayUrls[i]}`);
+        } else {
+            console.warn("[RELAY LOOP] URL " + i + " inválida/off, pulando: " + channel.relayUrls[i]);
+            logChannelEvent(channel.id, `[RELAY LOOP] URL #${i + 1} FALHOU (inválida/off): ${channel.relayUrls[i]}`);
+        }
+    }
+    if (probed.length === 0) {
+        channel.relayUrlProbed = undefined;
+        channel.relayUrlDurations = undefined;
+        logChannelEvent(channel.id, `[ERRO] Nenhuma URL válida encontrada. Todas as ${channel.relayUrls.length} URLs falharam no ffprobe.`);
+        return { status: 'error', message: 'Nenhuma URL válida encontrada. Todas falharam no ffprobe.' };
+    }
+    channel.relayUrlProbed = probed;
+    channel.relayUrlDurations = durations;
+    if (channel.currentUrlIndex === undefined || channel.currentUrlIndex >= probed.length) {
+        channel.currentUrlIndex = 0;
+    }
+    setRelayFlag(channel.id);
+    channel.status = 'relay';
+    channel.startedAt = Date.now();
+    await saveChannels();
+    scheduleRelayLoop(channel);
+    logChannelEvent(channel.id, `[RELAY LOOP] Canal ativado com ${probed.length}/${channel.relayUrls.length} URLs válidas. Vídeo inicial: #${channel.currentUrlIndex + 1}`);
+    console.log("[RELAY LOOP] Canal " + channel.id + " ativado com " + probed.length + "/" + channel.relayUrls.length + " URLs válidas");
+    return { status: 'success', mode: 'relay-loop', validUrls: probed.length, totalUrls: channel.relayUrls.length };
+}
+
 
 
 
@@ -1008,19 +1079,33 @@ const server = http.createServer(async (req, res) => {
 
     // API: Buscar Logs de um canal
     if (url.pathname === '/api/logs' && req.method === 'GET') {
-        const id = url.searchParams.get('id');
+        const id = Number(url.searchParams.get('id'));
         const logPath = path.join(LOGS_DIR, `canal_${id}.log`);
         
+        // Se o arquivo de log não existir ou estiver vazio (0 bytes), cria registro inicial
+        let stats = null;
+        try { if (fs.existsSync(logPath)) stats = fs.statSync(logPath); } catch (e) {}
+        
+        if (!stats || stats.size === 0) {
+            const channel = channels.find(c => c.id === id);
+            const channelName = channel ? channel.name : `Canal ${id}`;
+            const channelMode = channel ? (channel.status || 'offline') : 'desconhecido';
+            const initialMessage = `[${new Date().toLocaleString()}] [SISTEMA] Log inicializado para ${channelName} (Status: ${channelMode}). Aguardando eventos...\n`;
+            try {
+                if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+                fs.writeFileSync(logPath, initialMessage);
+                stats = fs.statSync(logPath);
+            } catch (e) {}
+        }
+
         if (fs.existsSync(logPath)) {
-            // Lê apenas os últimos 5KB do log para não sobrecarregar
-            const stats = fs.statSync(logPath);
-            const start = Math.max(0, stats.size - 5120);
+            const start = Math.max(0, (stats ? stats.size : 0) - 5120);
             const stream = fs.createReadStream(logPath, { start });
-            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
             return stream.pipe(res);
         }
-        res.writeHead(404);
-        return res.end("Log não encontrado.");
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end(`[${new Date().toLocaleString()}] [SISTEMA] Log aguardando eventos.`);
     }
 
     // API: Limpar todos os logs de todos os canais
