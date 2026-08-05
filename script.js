@@ -32,6 +32,15 @@ async function updateStats() {
         document.getElementById('net-usage').innerText = `${data.rede} Mbps`;
         document.getElementById('active-streams').innerText = data.activeStreams;
 
+        updateTrends([
+            { id: 'io-usage', value: data.io },
+            { id: 'cpu-usage', value: data.cpu },
+            { id: 'ram-usage', value: data.ram },
+            { id: 'disk-usage', value: data.disco },
+            { id: 'net-usage', value: data.rede },
+            { id: 'active-streams', value: data.activeStreams, inverse: true }
+        ]);
+
         // Renderizar discos/SSDs
         if (data.disks && data.disks.length > 0) {
             const container = document.getElementById('disks-container');
@@ -80,6 +89,38 @@ async function updateStats() {
     }
 }
 
+// Histórico de amostras para badges de tendência
+const trendHistory = {};
+
+function updateTrends(metrics) {
+    metrics.forEach(m => {
+        const el = document.getElementById(`trend-${m.id}`);
+        if (!el) return;
+
+        const prev = trendHistory[m.id];
+        trendHistory[m.id] = m.value;
+
+        // Primeira amostra ou valor estável: badge neutro
+        if (prev === undefined || prev === m.value) {
+            el.className = 'trend';
+            el.innerHTML = '<span class="trend-arrow">~</span> estável';
+            return;
+        }
+
+        const diff = m.value - prev;
+        const pct = prev !== 0 ? Math.round((diff / prev) * 100) : 0;
+        const up = diff > 0;
+        const arrow = up ? '▲' : '▼';
+
+        // Para métricas de uso: subir = pior (down), cair = melhor (up).
+        // Para métricas com "inverse: true" (streams): subir = melhor (up).
+        const good = m.inverse ? up : !up;
+
+        el.className = `trend ${good ? 'up' : 'down'}`;
+        el.innerHTML = `<span class="trend-arrow">${arrow}</span> ${Math.abs(pct)}%`;
+    });
+}
+
 async function toggleNocache() {
     try {
         const res = await fetch('/api/toggle-nocache', { method: 'POST' });
@@ -104,6 +145,16 @@ async function logout() {
     } catch (err) {
         console.error('Erro ao fazer logout:', err);
     }
+}
+
+// Alternância de tema claro/escuro (persistido em localStorage)
+function toggleTheme() {
+    const root = document.documentElement;
+    const current = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', current);
+    try {
+        localStorage.setItem('drm-theme', current);
+    } catch (err) { /* storage indisponível */ }
 }
 
 async function start(id) { 
@@ -237,9 +288,9 @@ async function loadAndRenderChannels(filter = '') {
             const nameCell = row.insertCell();
             let nameHTML = channel.name;
             if (channel.is18) {
-                nameHTML += " <span class=\"badge-18\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para desmarcar +18\">18+</span>";
+                nameHTML += ` <span class="badge-18" data-action="toggle18" data-id="${channel.id}" title="Clique para desmarcar +18">18+</span>`;
             } else {
-                nameHTML += " <span class=\"badge-18 off\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para marcar como +18\">+18?</span>";
+                nameHTML += ` <span class="badge-18 off" data-action="toggle18" data-id="${channel.id}" title="Clique para marcar como +18">+18?</span>`;
             }
             nameCell.innerHTML = nameHTML;
             
@@ -268,35 +319,34 @@ async function loadAndRenderChannels(filter = '') {
                 : `<span class="stat-muted">-</span>`;
             
             const actionsCell = row.insertCell();
-            const streamUrl = "/canais/" + channel.id + "/index.m3u8";
             
             let actionBtns = '';
             
             // Botão Iniciar/Parar
             if (channel.status === 'offline') {
-                actionBtns += "<button class=\"btn-primary btn-icon\" onclick=\"start(" + channel.id + ")\" title=\"Iniciar\">" + svgIcon('play') + "</button>";
+                actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${svgIcon('play')}</button>`;
             } else {
-                actionBtns += "<button class=\"btn-stop btn-icon\" onclick=\"stop(" + channel.id + ")\" title=\"Parar\">" + svgIcon('stop') + "</button>";
+                actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${svgIcon('stop')}</button>`;
             }
             
             // Botão Avançar (apenas para Relay Loop)
             if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
-                actionBtns += "<button class=\"btn-edit btn-icon\" onclick=\"advanceRelay(" + channel.id + ")\" title=\"Próximo Vídeo\">" + svgIcon('next') + "</button>";
+                actionBtns += `<button class="btn-edit btn-icon" data-action="advanceRelay" data-id="${channel.id}" title="Próximo Vídeo">${svgIcon('next')}</button>`;
             }
             
             // Botão M3U (Copiar Link M3U do Canal)
-            actionBtns += "<button class=\"btn-cyan btn-icon\" onclick=\"copyChannelM3U(" + channel.id + ")\" title=\"Copiar Link M3U\">" + svgIcon('link') + "</button>";
+            actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${svgIcon('link')}</button>`;
 
             // Assistir se ativo (Abre Pop-up Modal com Player HLS)
             if (channel.status !== 'offline') {
-                actionBtns += "<button class=\"btn-blue btn-icon\" onclick=\"openPlayerModal(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Assistir no Pop-up\">" + svgIcon('play') + " ASSISTIR</button>";
+                actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${channel.name.replace(/"/g, '&quot;')}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
             }
             
             // Ações padrão
             actionBtns += " " +
-                "<button class=\"btn-edit btn-icon\" onclick=\"showEditChannelModal(" + channel.id + ")\" title=\"Editar\">" + svgIcon('edit') + "</button> " +
-                "<button class=\"btn-neutral btn-icon\" onclick=\"viewLogs(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Logs\">" + svgIcon('logs') + "</button> " +
-                "<button class=\"btn-stop btn-icon\" onclick=\"deleteChannel(" + channel.id + ", '" + channel.status + "')\" title=\"Excluir\">" + svgIcon('trash') + "</button>";
+                `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
+                `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${channel.name.replace(/"/g, '&quot;')}" title="Logs">${svgIcon('logs')}</button> ` +
+                `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
             
             actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
         });
@@ -615,9 +665,8 @@ async function loadLoginAttempts() {
                 <td>${a.user}</td>
                 <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
                 <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
-                <td class="ua-cell" title="${a.userAgent}">${a.userAgent || '-'}</td>
-                <td>
-                    <button class="btn-danger btn-small" onclick="blockIP('${a.ip}')">BLOQUEAR</button>
+                     <td>
+                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${a.ip}">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -641,7 +690,7 @@ async function loadBlockedIPs() {
             <tr>
                 <td><code>${ip}</code></td>
                 <td>
-                    <button class="btn-primary btn-small" onclick="unblockIP('${ip}')">DESBLOQUEAR</button>
+                    <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${ip}">DESBLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -667,7 +716,7 @@ async function loadTopAttackers() {
                 <td class="stat-ok">${a.successes}</td>
                 <td>${new Date(a.lastAttempt).toLocaleString('pt-BR')}</td>
                 <td>
-                    <button class="btn-danger btn-small" onclick="blockIP('${a.ip}')">BLOQUEAR</button>
+                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${a.ip}">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -704,7 +753,7 @@ async function loadNginxAccess() {
                 <td>${channelsStr}${more}</td>
                 <td class="stat-num">${entry.totalHits}</td>
                 <td>${new Date(entry.lastSeen).toLocaleString('pt-BR')}</td>
-                <td><button class="btn-danger btn-small" onclick="blockIP('${entry.ip}')">BLOQUEAR</button></td>
+                <td><button class="btn-danger btn-small" data-action="blockIP" data-ip="${entry.ip}">BLOQUEAR</button></td>
             </tr>`;
         }).join('');
     } catch (e) {
@@ -1105,3 +1154,136 @@ async function clearAllLogs() {
         alert('Erro ao conectar com o servidor para limpar os logs.');
     }
 }
+
+// ═════════════════════════════════════════════════════════════════
+// EVENT LISTENERS & INICIALIZAÇÃO DA INTERFACE (ZERO INLINE)
+// ═════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+    // Theme toggle
+    const themeBtn = document.querySelector('.btn-theme');
+    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+    // Logout button
+    const logoutBtn = document.querySelector('.btn-logout');
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+    // Cache card
+    const cacheCard = document.getElementById('cache-card');
+    if (cacheCard) cacheCard.addEventListener('click', toggleNocache);
+
+    // Tab buttons
+    const btnTabCanais = document.getElementById('btn-tab-canais');
+    if (btnTabCanais) btnTabCanais.addEventListener('click', () => switchTab('canais'));
+
+    const btnTabSeguranca = document.getElementById('btn-tab-seguranca');
+    if (btnTabSeguranca) btnTabSeguranca.addEventListener('click', () => switchTab('seguranca'));
+
+    // Filter select & Search input
+    const filterSelect = document.getElementById('filter-select');
+    if (filterSelect) filterSelect.addEventListener('change', handleSearch);
+
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.addEventListener('input', handleSearch);
+
+    // Action buttons
+    const btnStartAll = document.getElementById('btn-start-all');
+    if (btnStartAll) btnStartAll.addEventListener('click', startAll);
+
+    const btnStopAll = document.getElementById('btn-stop-all');
+    if (btnStopAll) btnStopAll.addEventListener('click', stopAll);
+
+    const btnDownloadM3U = document.getElementById('btn-download-m3u');
+    if (btnDownloadM3U) btnDownloadM3U.addEventListener('click', downloadM3U);
+
+    const btnClearLogs = document.getElementById('btn-clear-logs');
+    if (btnClearLogs) btnClearLogs.addEventListener('click', clearAllLogs);
+
+    const btnCreateChannel = document.getElementById('btn-create-channel');
+    if (btnCreateChannel) btnCreateChannel.addEventListener('click', showCreateChannelModal);
+
+    // Refresh buttons
+    const btnRefreshLogins = document.getElementById('btn-refresh-logins');
+    if (btnRefreshLogins) btnRefreshLogins.addEventListener('click', loadLoginAttempts);
+
+    const btnRefreshAccess = document.getElementById('btn-refresh-access');
+    if (btnRefreshAccess) btnRefreshAccess.addEventListener('click', loadNginxAccess);
+
+    // Table Header Sorts
+    document.querySelectorAll('.th-sort').forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.getAttribute('data-sort');
+            if (col) sortTable(col);
+        });
+    });
+
+    // Modals
+    const channelModeSelect = document.getElementById('channel-mode-select');
+    if (channelModeSelect) channelModeSelect.addEventListener('change', onChannelModeChange);
+
+    const toggleSourceType = document.getElementById('toggle-source-type');
+    if (toggleSourceType) toggleSourceType.addEventListener('click', (e) => toggleSourceInput(e));
+
+    const relayM3uSelect = document.getElementById('relay-m3u-select');
+    if (relayM3uSelect) relayM3uSelect.addEventListener('change', onM3UFileSelect);
+
+    const modalSubmitBtn = document.getElementById('modal-submit-btn');
+    if (modalSubmitBtn) modalSubmitBtn.addEventListener('click', createOrEditChannel);
+
+    const btnCancelModal = document.getElementById('btn-cancel-modal');
+    if (btnCancelModal) btnCancelModal.addEventListener('click', hideCreateChannelModal);
+
+    const btnSubmitSwitchMode = document.getElementById('btn-submit-switch-mode');
+    if (btnSubmitSwitchMode) btnSubmitSwitchMode.addEventListener('click', submitSwitchMode);
+
+    const btnCancelSwitchMode = document.getElementById('btn-cancel-switch-mode');
+    if (btnCancelSwitchMode) btnCancelSwitchMode.addEventListener('click', hideSwitchModeModal);
+
+    const btnCloseLogs = document.getElementById('btn-close-logs');
+    if (btnCloseLogs) btnCloseLogs.addEventListener('click', hideLogsModal);
+
+    const btnClosePlayer = document.getElementById('btn-close-player');
+    if (btnClosePlayer) btnClosePlayer.addEventListener('click', closePlayerModal);
+
+    const btnCopyPlayerUrl = document.getElementById('btn-copy-player-url');
+    if (btnCopyPlayerUrl) btnCopyPlayerUrl.addEventListener('click', copyCurrentPlayerUrl);
+
+    const scrollToTopBtn = document.getElementById('scroll-to-top');
+    if (scrollToTopBtn) scrollToTopBtn.addEventListener('click', scrollToTop);
+
+    // Event Delegation para Canais e Segurança (Botões Dinâmicos da Tabela)
+    const channelsTable = document.getElementById('channels-table');
+    if (channelsTable) {
+        channelsTable.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+            const action = target.getAttribute('data-action');
+            const id = Number(target.getAttribute('data-id'));
+            const name = target.getAttribute('data-name') || '';
+            const status = target.getAttribute('data-status') || '';
+
+            if (action === 'toggle18') toggle18(id);
+            else if (action === 'start') start(id);
+            else if (action === 'stop') stop(id);
+            else if (action === 'advanceRelay') advanceRelay(id);
+            else if (action === 'copyChannelM3U') copyChannelM3U(id);
+            else if (action === 'openPlayerModal') openPlayerModal(id, name);
+            else if (action === 'showEditChannelModal') showEditChannelModal(id);
+            else if (action === 'viewLogs') viewLogs(id, name);
+            else if (action === 'deleteChannel') deleteChannel(id, status);
+        });
+    }
+
+    // Delegation para Security Tables (blockIP / unblockIP)
+    document.querySelectorAll('#login-attempts-table, #top-attackers-table, #blocked-ips-table, #nginx-access-table').forEach(table => {
+        if (table) {
+            table.addEventListener('click', (e) => {
+                const target = e.target.closest('[data-action]');
+                if (!target) return;
+                const action = target.getAttribute('data-action');
+                const ip = target.getAttribute('data-ip');
+                if (action === 'blockIP' && ip) blockIP(ip);
+                else if (action === 'unblockIP' && ip) unblockIP(ip);
+            });
+        }
+    });
+});

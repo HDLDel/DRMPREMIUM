@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel 24 Horas · DRM Premium</title>
-    <link rel="stylesheet" href="style.css?v=3.0.0">
+    <link rel="stylesheet" href="style.css?v=4.0.0">
 </head>
 <body>
 
@@ -16,7 +16,11 @@
         <div class="header-clock">
             <div class="clock-date" id="header-date"></div>
             <div class="clock-block" id="header-time">--:--:--</div>
-            <button class="btn-logout" onclick="logout()">
+            <button class="btn-theme" aria-label="Alternar tema claro/escuro" title="Alternar tema">
+                <svg class="icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <svg class="icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+            <button class="btn-logout">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Sair
             </button>
@@ -28,34 +32,52 @@
         <div class="card">
             <div class="tick tick-green"></div>
             <h3>IO</h3>
-            <div class="value" id="io-usage">0%</div>
+            <div class="card-trend">
+                <div class="value" id="io-usage">0%</div>
+            </div>
+            <span class="trend" id="trend-io-usage"></span>
         </div>
         <div class="card">
             <div class="tick tick-cyan"></div>
             <h3>CPU</h3>
-            <div class="value" id="cpu-usage">0%</div>
+            <div class="card-trend">
+                <div class="value" id="cpu-usage">0%</div>
+            </div>
+            <span class="trend" id="trend-cpu-usage"></span>
         </div>
         <div class="card">
             <div class="tick tick-yellow"></div>
             <h3>RAM</h3>
-            <div class="value" id="ram-usage">0%</div>
+            <div class="card-trend">
+                <div class="value" id="ram-usage">0%</div>
+            </div>
+            <span class="trend" id="trend-ram-usage"></span>
         </div>
         <div class="card">
             <div class="tick tick-magenta"></div>
             <h3>Disco</h3>
-            <div class="value" id="disk-usage">0%</div>
+            <div class="card-trend">
+                <div class="value" id="disk-usage">0%</div>
+            </div>
+            <span class="trend" id="trend-disk-usage"></span>
         </div>
         <div class="card">
             <div class="tick tick-blue"></div>
             <h3>Rede</h3>
-            <div class="value" id="net-usage">0.00 Mbps</div>
+            <div class="card-trend">
+                <div class="value" id="net-usage">0.00 Mbps</div>
+            </div>
+            <span class="trend" id="trend-net-usage"></span>
         </div>
         <div class="card">
             <div class="tick tick-green"></div>
             <h3>Streams Ativos</h3>
-            <div class="value" id="active-streams">0</div>
+            <div class="card-trend">
+                <div class="value" id="active-streams">0</div>
+            </div>
+            <span class="trend" id="trend-active-streams"></span>
         </div>
-        <div class="card" id="cache-card" onclick="toggleNocache()" style="cursor:pointer;" role="button" tabindex="0">
+        <div class="card u-cursor-pointer" id="cache-card" role="button" tabindex="0">
             <div class="tick tick-yellow"></div>
             <h3>Cache Disco</h3>
             <div class="value" id="cache-status">⋯</div>
@@ -64,8 +86,8 @@
 
     <!-- Navegação por abas -->
     <div class="tab-nav" role="tablist">
-        <button class="tab-btn active" role="tab" onclick="switchTab('canais')"><span class="page-no">P1</span> Canais</button>
-        <button class="tab-btn" role="tab" onclick="switchTab('seguranca')"><span class="page-no">P2</span> Segurança</button>
+        <button class="tab-btn active" role="tab" id="btn-tab-canais"><span class="page-no">P1</span> Canais</button>
+        <button class="tab-btn" role="tab" id="btn-tab-seguranca"><span class="page-no">P2</span> Segurança</button>
     </div>
 
     <!-- Aba P1: Canais -->
@@ -92,43 +114,43 @@
                 <div class="search-bar">
                     <div class="search-group">
                         <input type="text" id="search-input" placeholder="Buscar canais...">
-                        <select id="filter-select" onchange="handleSearch()">
+                        <select id="filter-select">
                             <option value="all">TODOS OS CANAIS</option>
                             <option value="18">APENAS +18</option>
                             <option value="family">LIVRE (SEM +18)</option>
                         </select>
                     </div>
                     <div class="btn-group">
-                        <button class="btn-primary" onclick="startAll()">
+                        <button class="btn-primary" id="btn-start-all">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                             Iniciar Todos
                         </button>
-                        <button class="btn-stop" onclick="stopAll()">
+                        <button class="btn-stop" id="btn-stop-all">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
                             Parar Todos
                         </button>
-                        <button class="btn-blue" onclick="downloadM3U()">
+                        <button class="btn-blue" id="btn-download-m3u">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             Exportar M3U
                         </button>
-                        <button class="btn-neutral" onclick="clearAllLogs()">
+                        <button class="btn-neutral" id="btn-clear-logs">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             Limpar Logs
                         </button>
-                        <button class="btn-yellow" onclick="showCreateChannelModal()">
+                        <button class="btn-yellow" id="btn-create-channel">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             Criar Novo Canal
                         </button>
                     </div>
                 </div>
-                <div style="overflow-x:auto;">
+                <div class="u-overflow-x">
                     <table>
                         <thead>
                             <tr>
-                                <th onclick="sortTable('id')">ID <span id="sort-icon-id"></span></th>
-                                <th onclick="sortTable('name')">Nome <span id="sort-icon-name"></span></th>
-                                <th onclick="sortTable('status')">Status <span id="sort-icon-status"></span></th>
-                                <th onclick="sortTable('uptime')">Uptime <span id="sort-icon-uptime"></span></th>
+                                <th class="th-sort" data-sort="id">ID <span id="sort-icon-id"></span></th>
+                                <th class="th-sort" data-sort="name">Nome <span id="sort-icon-name"></span></th>
+                                <th class="th-sort" data-sort="status">Status <span id="sort-icon-status"></span></th>
+                                <th class="th-sort" data-sort="uptime">Uptime <span id="sort-icon-uptime"></span></th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
@@ -153,13 +175,13 @@
                 </div>
                 <div class="search-bar">
                     <div class="btn-group">
-                        <button class="btn-blue" onclick="loadLoginAttempts()">
+                        <button class="btn-blue" id="btn-refresh-logins">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                             Atualizar
                         </button>
                     </div>
                 </div>
-                <div style="overflow-x:auto;">
+                <div class="u-overflow-x">
                     <table>
                         <thead>
                             <tr>
@@ -185,8 +207,8 @@
                     <span>Top IPs Suspeitos</span>
                     <span class="bar-hint">TENTATIVAS DE LOGIN</span>
                 </div>
-                <p class="hint" style="padding:0 14px;">IPs com maior número de tentativas de login (ordenado por total decrescente)</p>
-                <div style="overflow-x:auto;">
+                <p class="hint u-padding-hint">IPs com maior número de tentativas de login (ordenado por total decrescente)</p>
+                <div class="u-overflow-x">
                     <table>
                         <thead>
                             <tr>
@@ -211,7 +233,7 @@
                 <div class="section-bar cyan">
                     <span>IPs Bloqueados</span>
                 </div>
-                <div style="overflow-x:auto;">
+                <div class="u-overflow-x">
                     <table>
                         <thead>
                             <tr>
@@ -235,13 +257,13 @@
                 </div>
                 <div class="search-bar">
                     <div class="btn-group">
-                        <button class="btn-blue" onclick="loadNginxAccess()">
+                        <button class="btn-blue" id="btn-refresh-access">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                             Atualizar
                         </button>
                     </div>
                 </div>
-                <div style="overflow-x:auto;">
+                <div class="u-overflow-x">
                     <table>
                         <thead>
                             <tr>
@@ -277,7 +299,7 @@
 
                 <div class="field">
                     <label for="channel-mode-select">Modo de Transmissão</label>
-                    <select id="channel-mode-select" onchange="onChannelModeChange()">
+                    <select id="channel-mode-select">
                         <option value="live">PASTA LOCAL (AO VIVO / MP4s)</option>
                         <option value="relay">RETRANSMISSÃO (LINKS EXTERNOS / RELAY)</option>
                     </select>
@@ -291,16 +313,16 @@
                             <select id="video-source-select">
                                 <option value="">Carregando...</option>
                             </select>
-                            <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none;">
-                            <div style="margin-top:5px; text-align:right;">
-                                <a href="#" id="toggle-source-type" class="link-toggle" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+                            <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" class="u-hidden">
+                            <div class="u-margin-top-5 u-text-right">
+                                <a href="#" id="toggle-source-type" class="link-toggle">Usar caminho absoluto manual</a>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Seção Relay -->
-                <div id="relay-section" style="display:none;">
+                <div id="relay-section" class="u-hidden">
                     <div class="field">
                         <label for="relay-subtype-select">Tipo de Relay</label>
                         <select id="relay-subtype-select">
@@ -311,7 +333,7 @@
 
                     <div class="field">
                         <label for="relay-m3u-select">Importar Playlist M3U (VPS /home/drmpremium)</label>
-                        <select id="relay-m3u-select" onchange="onM3UFileSelect()">
+                        <select id="relay-m3u-select">
                             <option value="">-- Selecione para importar links --</option>
                         </select>
                     </div>
@@ -334,8 +356,8 @@
 
             </div>
             <div class="modal-foot">
-                <button id="modal-submit-btn" class="btn-yellow" onclick="createOrEditChannel()">Criar Canal</button>
-                <button class="btn-neutral" onclick="hideCreateChannelModal()">Cancelar</button>
+                <button id="modal-submit-btn" class="btn-yellow">Criar Canal</button>
+                <button class="btn-neutral" id="btn-cancel-modal">Cancelar</button>
             </div>
         </div>
     </div>
@@ -347,7 +369,7 @@
                 <h2>Alterar Modo do Canal</h2>
             </div>
             <div class="modal-body">
-                <p id="switch-mode-channel-name" class="stat-kicker" style="margin-bottom:14px;"></p>
+                <p id="switch-mode-channel-name" class="stat-kicker u-margin-bottom-14"></p>
 
                 <div class="field">
                     <label for="fast-mode-select">Selecione o Novo Modo</label>
@@ -361,8 +383,8 @@
                 </div>
             </div>
             <div class="modal-foot">
-                <button class="btn-yellow" onclick="submitSwitchMode()">Salvar</button>
-                <button class="btn-neutral" onclick="hideSwitchModeModal()">Cancelar</button>
+                <button class="btn-yellow" id="btn-submit-switch-mode">Salvar</button>
+                <button class="btn-neutral" id="btn-cancel-switch-mode">Cancelar</button>
             </div>
         </div>
     </div>
@@ -372,7 +394,7 @@
         <div class="modal-card wide">
             <div class="modal-head magenta">
                 <h2 id="log-modal-title">Logs do Canal</h2>
-                <button class="btn-neutral" onclick="hideLogsModal()">Fechar</button>
+                <button class="btn-neutral" id="btn-close-logs">Fechar</button>
             </div>
             <pre id="log-content" class="log-content"></pre>
         </div>
@@ -381,23 +403,23 @@
     <!-- Modal: Player de Vídeo -->
     <div id="player-modal" class="modal">
         <div class="modal-card player">
-            <div class="modal-head" style="padding:0;">
+            <div class="modal-head u-padding-0">
                 <h2 id="player-modal-title">Reproduzindo Canal</h2>
-                <button class="btn-stop" onclick="closePlayerModal()">Fechar</button>
+                <button class="btn-stop" id="btn-close-player">Fechar</button>
             </div>
             <video id="hls-video-player" class="player-video" controls autoplay></video>
             <div class="player-footer">
                 <span class="player-url" id="player-stream-url"></span>
-                <button class="btn-cyan btn-small" onclick="copyCurrentPlayerUrl()">Copiar Link</button>
+                <button class="btn-cyan btn-small" id="btn-copy-player-url">Copiar Link</button>
             </div>
         </div>
     </div>
 
-    <button id="scroll-to-top" onclick="scrollToTop()" aria-label="Voltar ao topo">
+    <button id="scroll-to-top" aria-label="Voltar ao topo">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
     </button>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="script.js?v=3.0.0"></script>
+    <script src="script.js?v=4.0.0"></script>
 </body>
 </html>
