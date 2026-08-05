@@ -84,8 +84,9 @@ function saveBlockedIPs() {
     try {
         fs.writeFileSync(BLOCKED_IPS_FILE, JSON.stringify([...blockedIPs], null, 2));
         // Gera conf do nginx
-        const conf = blockedIPs.size > 0 
-            ? [...blockedIPs].map(ip => `deny ${ip};`).join('\n') + '\n'
+        const valid = [...blockedIPs].filter(isValidIP);
+        const conf = valid.length > 0 
+            ? valid.map(ip => `deny ${ip};`).join('\n') + '\n'
             : '';
         fs.writeFileSync('/etc/nginx/blocked_ips.conf', conf);
         // Reload nginx sem derrubar conexões ativas
@@ -262,10 +263,31 @@ function getCookies(req) {
     if (rc) {
         rc.split(';').forEach(cookie => {
             const parts = cookie.split('=');
-            list[parts.shift().trim()] = decodeURI(parts.join('='));
+            const key = parts.shift().trim();
+            let value;
+            try {
+                value = decodeURI(parts.join('='));
+            } catch (e) {
+                value = parts.join('=');
+            }
+            list[key] = value;
         });
     }
     return list;
+}
+
+// Valida se o valor parece um IP (IPv4 ou IPv6) para evitar injeção de comando
+function isValidIP(ip) {
+    if (typeof ip !== 'string' || !ip || ip.length > 45) return false;
+    const ipv4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+    if (ipv4.test(ip)) return true;
+    // IPv6 básico (inclui formas compactas, sem zona/scope)
+    if (!ip.includes(':')) return false;
+    if (!/^[0-9a-fA-F:]+$/.test(ip)) return false;
+    const parts = ip.split(':');
+    if (parts.length < 3 || parts.length > 8) return false;
+    if (parts.some(p => p.length > 4)) return false;
+    return true;
 }
 
 async function loadChannels() {
@@ -279,9 +301,16 @@ async function loadChannels() {
     }
 }
 
-async function saveChannels() {
-    await fs.promises.writeFile(CHANNELS_DB_FILE, JSON.stringify(channels, null, 2), 'utf8');
-    console.log(`Saved ${channels.length} channels to ${CHANNELS_DB_FILE}`);
+// Fila de gravação para evitar last-writer-wins em writes concorrentes
+let saveChannelsQueue = Promise.resolve();
+function saveChannels() {
+    const snapshot = JSON.stringify(channels, null, 2);
+    const count = channels.length;
+    saveChannelsQueue = saveChannelsQueue
+        .then(() => fs.promises.writeFile(CHANNELS_DB_FILE, snapshot, 'utf8'))
+        .then(() => console.log(`Saved ${count} channels to ${CHANNELS_DB_FILE}`))
+        .catch(e => console.error('[ERRO] Falha ao salvar channels.json:', e.message));
+    return saveChannelsQueue;
 }
 
 // Helper para listar subdiretórios recursivamente para a seleção no Dashboard
@@ -399,70 +428,6 @@ function scheduleRelayLoop(channel) {
         const nextIdx = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
         ch.currentUrlIndex = nextIdx;
         saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
-        const currentUrl = ch.relayUrlProbed[nextIdx] || '';
-        console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
-        logChannelEvent(ch.id, `[RELAY LOOP] Avançou automaticamente para o vídeo #${nextIdx + 1}/${ch.relayUrlProbed.length} (${currentUrl})`);
-        scheduleRelayLoop(ch);
-    }, dur * 1000);
-    relayLoopTimers.set(channel.id, timer);
-}
-
-async function startRelayLoop(channel) {
-    logChannelEvent(channel.id, `\n--- INICIANDO CANAL ${channel.id} (${channel.name}) [RELAY LOOP] EM ${new Date().toLocaleString()} ---`);
-    logChannelEvent(channel.id, `[RELAY LOOP] Sondando ${channel.relayUrls.length} URLs via FFprobe...`);
-    console.log("[RELAY LOOP] Probing " + channel.relayUrls.length + " URLs para canal " + channel.id + "...");
-    const results = await Promise.all(channel.relayUrls.map(u => probeUrlDuration(u)));
-    const probed = [];
-    const durations = [];
-    for (let i = 0; i < results.length; i++) {
-        if (results[i] !== null) {
-            probed.push(channel.relayUrls[i]);
-            durations.push(results[i]);
-            logChannelEvent(channel.id, `[RELAY LOOP] URL #${i + 1} OK (${Math.round(results[i])}s): ${channel.relayUrls[i]}`);
-        } else {
-            console.warn("[RELAY LOOP] URL " + i + " inválida/off, pulando: " + channel.relayUrls[i]);
-            logChannelEvent(channel.id, `[RELAY LOOP] URL #${i + 1} FALHOU (inválida/off): ${channel.relayUrls[i]}`);
-        }
-    }
-    if (probed.length === 0) {
-        channel.relayUrlProbed = undefined;
-        channel.relayUrlDurations = undefined;
-        logChannelEvent(channel.id, `[ERRO] Nenhuma URL válida encontrada. Todas as ${channel.relayUrls.length} URLs falharam no ffprobe.`);
-        return { status: 'error', message: 'Nenhuma URL válida encontrada. Todas falharam no ffprobe.' };
-    }
-    channel.relayUrlProbed = probed;
-    channel.relayUrlDurations = durations;
-    if (channel.currentUrlIndex === undefined || channel.currentUrlIndex >= probed.length) {
-        channel.currentUrlIndex = 0;
-    }
-    setRelayFlag(channel.id);
-    channel.status = 'relay';
-    channel.startedAt = Date.now();
-    await saveChannels();
-    scheduleRelayLoop(channel);
-    logChannelEvent(channel.id, `[RELAY LOOP] Canal ativado com ${probed.length}/${channel.relayUrls.length} URLs válidas. Vídeo inicial: #${channel.currentUrlIndex + 1}`);
-    console.log("[RELAY LOOP] Canal " + channel.id + " ativado com " + probed.length + "/" + channel.relayUrls.length + " URLs válidas");
-    return { status: 'success', mode: 'relay-loop', validUrls: probed.length, totalUrls: channel.relayUrls.length };
-}
-
-
-
-
-function scheduleRelayLoop(channel) {
-    clearRelayLoopTimer(channel.id);
-    const urls = channel.relayUrlProbed || channel.relayUrls;
-    const durations = channel.relayUrlDurations || [];
-    if (!urls || urls.length < 2) return;
-    const idx = channel.currentUrlIndex || 0;
-    const dur = durations[idx];
-    if (!dur || dur <= 0) return;
-    console.log("[RELAY LOOP] Canal " + channel.id + " agendado: avança da posição " + idx + " em " + Math.round(dur) + "s");
-    const timer = setTimeout(() => {
-        const ch = channels.find(c => c.id === channel.id && c.status === 'relay');
-        if (!ch || ch.relaySubtype !== 'loop') return;
-        const nextIdx = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
-        ch.currentUrlIndex = nextIdx;
-        saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
         console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
         scheduleRelayLoop(ch);
     }, dur * 1000);
@@ -537,6 +502,20 @@ function probeUrlDuration(url) {
             try { proc.kill(); } catch (e) {}
             resolve(null);
         }, 15000);
+    });
+}
+
+// Aguarda o processo terminar com timeout e tratamento de erro
+function waitForProcessClose(proc, timeoutMs = 120000) {
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (code) => { if (!done) { done = true; resolve(code); } };
+        proc.on('close', finish);
+        proc.on('error', () => finish(null));
+        setTimeout(() => {
+            try { proc.kill('SIGKILL'); } catch (e) {}
+            finish(null);
+        }, timeoutMs);
     });
 }
 
@@ -759,6 +738,10 @@ async function startChannel(id) {
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
+    // Reserva o slot imediatamente para evitar que duas chamadas concorrentes iniciem o mesmo canal
+    activeStreams.set(id, { process: null, startedAt: null });
+
+    try {
     if (channel.mode === 'relay') {
         setRelayFlag(id);
         console.log("[RELAY FLAG] Flag criada para canal " + id + " (sync)");
@@ -960,11 +943,20 @@ async function startChannel(id) {
     activeStreams.set(id, {
         process: ffmpeg,
         startedAt: channel.startedAt
-    });
-    channel.status = channel.mode === 'relay' ? 'relay' : 'online';
+    });    channel.status = channel.mode === 'relay' ? 'relay' : 'online';
+    if (channel.restartFails) channel.restartFails = 0;
     saveChannels();
 
     return { status: 'success', pid: ffmpeg.pid };
+    } catch (err) {
+        console.error(`[ERRO startChannel ${id}]`, err.message);
+        activeStreams.delete(id);
+        if (channel) {
+            channel.status = 'offline';
+            delete channel.startedAt;
+        }
+        return { status: 'error', message: err.message };
+    }
 }
 
 /**
@@ -976,11 +968,16 @@ const server = http.createServer(async (req, res) => {
 
     // Helper para obter IP real do cliente (trata proxy reverso)
     function getClientIP(req) {
-        const fwd = req.headers['x-forwarded-for'];
-        if (fwd) return fwd.split(',')[0].trim();
-        const real = req.headers['x-real-ip'];
-        if (real) return real.trim();
-        return req.socket?.remoteAddress || 'unknown';
+        const remote = (req.socket?.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+        // Só confia em headers de proxy quando o request vem de um proxy local (nginx)
+        const fromLoopback = remote === '127.0.0.1' || remote === '::1' || remote === 'unknown';
+        if (fromLoopback) {
+            const fwd = req.headers['x-forwarded-for'];
+            if (fwd) return fwd.split(',')[0].trim().replace(/^::ffff:/, '');
+            const real = req.headers['x-real-ip'];
+            if (real) return real.trim().replace(/^::ffff:/, '');
+        }
+        return remote;
     }
 
     // Autenticação Estrita via Cookie de Sessão (Zero Bypass de IP)
@@ -1008,9 +1005,16 @@ const server = http.createServer(async (req, res) => {
                 return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
             }
             
-            const cleanUser = user ? user.trim().toLowerCase() : '';
+            const cleanUser = (typeof user === 'string') ? user.trim().toLowerCase() : '';
             const adminFound = ADMINS.find(a => a.user.toLowerCase() === cleanUser);
-            const isPasswordValid = adminFound ? bcrypt.compareSync(pass, adminFound.hash) : false;
+            let isPasswordValid = false;
+            if (adminFound && typeof pass === 'string' && pass.length > 0) {
+                try {
+                    isPasswordValid = bcrypt.compareSync(pass, adminFound.hash);
+                } catch (e) {
+                    isPasswordValid = false;
+                }
+            }
             const success = !!(adminFound && isPasswordValid);
             
             recordLoginAttempt(clientIP, cleanUser, success, req.headers['user-agent']);
@@ -1060,8 +1064,8 @@ const server = http.createServer(async (req, res) => {
         return res.end(m3uContent);
     }
 
-    // Bloqueio Global: Se não autenticado por Cookie de Sessão, nega acesso (Redireciona páginas para /login.html e bloqueia APIs com 401)
-    if (!isAuth && !(url.pathname === '/login.html' || url.pathname.includes('.css') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/canais/'))) {
+// Bloqueio Global: Se não autenticado por Cookie de Sessão permitido: arquivos estáticos principais, fontes em `/fonts/*.ttf`
+if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' || url.pathname === '/favicon.png' || url.pathname.endsWith('.css') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/canais/'))) {
         if (url.pathname.startsWith('/api/')) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ status: 'error', message: 'Sessão inválida ou expirada. Faça login novamente.' }));
@@ -1137,6 +1141,7 @@ const server = http.createServer(async (req, res) => {
         let body = ''; // Removed canalNome from startChannel call
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 console.error(`[ERRO JSON] start com JSON inválido: ${e.message}`);
@@ -1167,6 +1172,11 @@ const server = http.createServer(async (req, res) => {
             const result = await startChannel(id); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result)); // Return result
+            } catch (err) {
+                console.error(`[ERRO start ${id}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao iniciar canal' }));
+            }
         });
         return;
     }
@@ -1445,7 +1455,7 @@ const server = http.createServer(async (req, res) => {
                         const validFiles = [];
                         for (const f of mp4Files) {
                             if (await isVideoValid(f)) validFiles.push(f);
-                            else console.warn(`[AVISO] Pulando arquivo corrompido: 	ext{f}`);
+                            else console.warn(`[AVISO] Pulando arquivo corrompido: ${f}`);
                         }
                         mp4Files = validFiles;
 
@@ -1495,6 +1505,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 console.error(`[ERRO JSON] delete com JSON inválido: ${e.message}`);
@@ -1536,6 +1547,11 @@ const server = http.createServer(async (req, res) => {
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'deleted' }));
+            } catch (err) {
+                console.error(`[ERRO delete ${id}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao excluir canal' }));
+            }
         });
         return;
     }
@@ -1553,7 +1569,10 @@ const server = http.createServer(async (req, res) => {
             const id = Number(data.id);
             
             const channel = channels.find(c => c.id === id);
-            if (channel) channel.status = 'offline';
+            if (channel) {
+                channel.status = 'offline';
+                delete channel.startedAt;
+            }
 
             clearRelayLoopTimer(id);
 
@@ -1565,6 +1584,7 @@ const server = http.createServer(async (req, res) => {
                 activeStreams.get(id).process.kill('SIGKILL');
                 activeStreams.delete(id);
             }
+            saveChannels().catch(e => console.error('[ERRO] Falha ao salvar channels no stop:', e));
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'stopped' }));
         });
@@ -1603,6 +1623,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 res.writeHead(400);
@@ -1629,6 +1650,7 @@ const server = http.createServer(async (req, res) => {
             if (newMode === 'offline') {
                 channel.status = 'offline';
                 channel.startedAt = undefined;
+                if (channel.restartFails) channel.restartFails = 0;
                 await saveChannels();
                 res.writeHead(200);
                 return res.end(JSON.stringify({ status: 'success', mode: 'offline' }));
@@ -1658,7 +1680,7 @@ const server = http.createServer(async (req, res) => {
                         '-hls_segment_filename', vodDir + "/segment_%03d.ts",
                         vodDir + "/index.m3u8"
                     ]);
-                    await new Promise(resolve => proc.on('close', resolve));
+                    await waitForProcessClose(proc);
                 }
                 setVodFlag(id);
                 channel.status = 'vod';
@@ -1702,6 +1724,12 @@ const server = http.createServer(async (req, res) => {
                 } else {
                     channel.mode = 'live';
                     channel.relaySubtype = null;
+                    // Reseta inputType para o modo live regenerar a playlist a partir da pasta de origem
+                    if (channel.inputType === 'relay') {
+                        channel.inputType = 'concat';
+                        channel.playlistFilePath = null;
+                        channel.currentUrlIndex = 0;
+                    }
                 }
                 await saveChannels();
                 const result = await startChannel(id);
@@ -1711,6 +1739,11 @@ const server = http.createServer(async (req, res) => {
 
             res.writeHead(400);
             res.end(JSON.stringify({ status: 'error', message: 'Modo inválido: ' + newMode }));
+            } catch (err) {
+                console.error(`[ERRO switch-mode ${id}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao alternar modo' }));
+            }
         });
         return;
     }
@@ -1720,6 +1753,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 res.writeHead(400);
@@ -1743,6 +1777,11 @@ const server = http.createServer(async (req, res) => {
             console.log("[RELAY LOOP] Canal " + channel.id + " avançado manualmente para posição " + channel.currentUrlIndex);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'success', currentIndex: channel.currentUrlIndex }));
+            } catch (err) {
+                console.error(`[ERRO relay-advance ${id}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao avançar relay' }));
+            }
         });
         return;
     }
@@ -1834,7 +1873,7 @@ const server = http.createServer(async (req, res) => {
                     `${outputDir}/index.m3u8`
                 ]);
                 proc.stderr.on('data', () => {});
-                await new Promise(resolve => proc.on('close', resolve));
+                await waitForProcessClose(proc);
                 console.log(`[CONVERT] Conversão concluída para canal ${id}`);
             }
 
@@ -1874,6 +1913,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 console.error(`[ERRO JSON] toggle-vod com JSON inválido: ${e.message}`);
@@ -1933,7 +1973,7 @@ const server = http.createServer(async (req, res) => {
                         `${vodDir}/index.m3u8`
                     ]);
                     proc.stderr.on('data', () => {});
-                    await new Promise(resolve => proc.on('close', resolve));
+                    await waitForProcessClose(proc);
                     console.log(`[TOGGLE] Conversão concluída para canal ${id}`);
                 }
 
@@ -1964,6 +2004,11 @@ const server = http.createServer(async (req, res) => {
                 console.log(`[TOGGLE] Canal ${id} alternado para VOD`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'success', mode: 'vod' }));
+            }
+            } catch (err) {
+                console.error(`[ERRO toggle-vod ${id}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao alternar VOD' }));
             }
         });
         return;
@@ -2001,6 +2046,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -2011,6 +2057,10 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'error', message: 'IP não informado' }));
             }
+            if (!isValidIP(ip)) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'IP inválido' }));
+            }
             blockedIPs.add(ip);
             saveBlockedIPs();
             // Tenta bloquear via UFW também
@@ -2018,6 +2068,11 @@ const server = http.createServer(async (req, res) => {
             console.log(`[SEGURANÇA] IP ${ip} bloqueado`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'success', ip }));
+            } catch (err) {
+                console.error(`[ERRO block-ip ${ip}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao bloquear IP' }));
+            }
         });
         return;
     }
@@ -2027,6 +2082,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
+            try {
             let data;
             try { data = JSON.parse(body); } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -2037,6 +2093,10 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'error', message: 'IP não informado' }));
             }
+            if (!isValidIP(ip)) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ status: 'error', message: 'IP inválido' }));
+            }
             blockedIPs.delete(ip);
             saveBlockedIPs();
             // Remove do UFW também
@@ -2044,6 +2104,11 @@ const server = http.createServer(async (req, res) => {
             console.log(`[SEGURANÇA] IP ${ip} desbloqueado`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'success', ip }));
+            } catch (err) {
+                console.error(`[ERRO unblock-ip ${ip}]`, err.message);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'error', message: 'Erro interno ao desbloquear IP' }));
+            }
         });
         return;
     }
@@ -2090,6 +2155,11 @@ const server = http.createServer(async (req, res) => {
     if (relayMatch) {
         const channelId = parseInt(relayMatch[1]);
         const requestedFile = relayMatch[2];
+        // Bloqueia arquivos internos que expõem caminhos absolutos/URLs de origem
+        if (requestedFile === 'playlist.txt' || requestedFile === 'playlist_urls.txt' || requestedFile === 'playlist.json') {
+            res.writeHead(403);
+            return res.end('Acesso negado');
+        }
         if (hasRelayFlag(channelId)) {
             const channel = channels.find(c => c.id === channelId && c.mode === 'relay');
             if (!channel) {
@@ -2178,17 +2248,29 @@ const server = http.createServer(async (req, res) => {
                 '-'
             ]);
             let stderrLog = '';
-            ffmpeg.stderr.on('data', d => stderrLog += d);
+            let killed = false;
+            const killFfmpeg = () => {
+                if (killed) return;
+                killed = true;
+                try { ffmpeg.kill('SIGKILL'); } catch (e) {}
+            };
+            ffmpeg.stderr.on('data', d => {
+                stderrLog = (stderrLog + d.toString()).slice(-4096);
+            });
             ffmpeg.on('error', (e) => {
                 console.error("[RELAY LOOP] Erro FFmpeg URL " + idx + ": " + e.message);
                 if (!res.headersSent) { res.writeHead(502); res.end('Transmux error'); }
             });
             ffmpeg.on('close', (code) => {
-                if (code !== 0 && !res.headersSent) {
+                if (code !== 0 && !res.headersSent && !killed) {
                     console.error("[RELAY LOOP] FFmpeg exit " + code + " URL " + idx + ": " + stderrLog.slice(-300));
                     res.writeHead(502); res.end('Transmux failed');
                 }
             });
+            // Mata o ffmpeg se o cliente desconectar para não vazar processos
+            req.on('close', killFfmpeg);
+            req.on('aborted', killFfmpeg);
+            res.on('close', killFfmpeg);
             res.writeHead(200, {
                 'Content-Type': 'video/MP2T',
                 'Access-Control-Allow-Origin': '*'
@@ -2218,7 +2300,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Servir Arquivos Estáticos (Dashboard)
-    let filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
+    const staticRoot = path.resolve(__dirname);
+    // Remove leading slash so path.resolve doesn't treat it as absolute (which would ignore staticRoot)
+    const relPath = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
+    let filePath = path.resolve(staticRoot, relPath);
+    
+    // Bloqueia acesso a arquivos sensíveis e garante que o path permanece dentro do diretório do painel
+    const blockedExt = ['.env', '.log', '.json', '.md'];
+    const blockedFiles = ['server.js', 'package.json', 'package-lock.json', 'channels.json', 'build-obfuscated.py', 'nginx_iptv.conf', '.env.example'];
+    const baseName = path.basename(filePath);
+    const isBlockedFile = blockedFiles.includes(baseName) || (blockedExt.includes(path.extname(filePath).toLowerCase()) && !url.pathname.startsWith('/canais/'));
+    if (!filePath.startsWith(staticRoot + path.sep) && filePath !== staticRoot) {
+        res.writeHead(403);
+        return res.end('Acesso negado');
+    }
+    if (isBlockedFile) {
+        res.writeHead(403);
+        return res.end('Acesso negado');
+    }
     
     fs.readFile(filePath, (err, content) => {
         if (err) {
@@ -2235,7 +2334,16 @@ const server = http.createServer(async (req, res) => {
                 '.woff2': 'font/woff2',
                 '.m3u8': 'application/vnd.apple.mpegurl',
                 '.ts': 'video/MP2T',
-                '.mp4': 'video/mp4'
+                '.mp4': 'video/mp4',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif',
+                '.svg': 'image/svg+xml',
+                '.webp': 'image/webp',
+                '.ico': 'image/x-icon',
+                '.json': 'application/json',
+                '.txt': 'text/plain'
             };
             
             const headers = { 'Content-Type': types[ext] || 'text/plain' };
@@ -2296,6 +2404,7 @@ setInterval(() => {
     });
 
     // Relay Guardian: revive relay-sync channels offline ou sem processo ativo
+    // Limite de tentativas consecutivas: se o canal falhar ao subir muitas vezes, pausa o guardian
     for (const channel of channels) {
         if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
             const isAlive = activeStreams.has(channel.id);
@@ -2304,9 +2413,17 @@ setInterval(() => {
                 channel.status = 'offline';
             }
             if (channel.status === 'offline') {
+                channel.restartFails = (channel.restartFails || 0) + 1;
+                if (channel.restartFails > 5) {
+                    console.warn(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) falhou ${channel.restartFails} vezes seguidas. Pausando auto-restart.`);
+                    continue;
+                }
                 console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) offline. Reiniciando relay-sync...`);
                 channel.status = 'relay';
-                setTimeout(async () => await startChannel(channel.id), 2000);
+                setTimeout(async () => {
+                    const result = await startChannel(channel.id);
+                    if (result && result.status === 'success') channel.restartFails = 0;
+                }, 2000);
             }
         }
     }

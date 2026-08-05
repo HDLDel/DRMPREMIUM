@@ -114,11 +114,18 @@
                 <div class="search-bar">
                     <div class="search-group">
                         <input type="text" id="search-input" placeholder="Buscar canais...">
-                        <select id="filter-select">
-                            <option value="all">TODOS OS CANAIS</option>
-                            <option value="18">APENAS +18</option>
-                            <option value="family">LIVRE (SEM +18)</option>
-                        </select>
+<select id="filter-select">
+    <option value="all">TODOS OS CANAIS</option>
+    <option value="18">APENAS +18</option>
+    <option value="family">LIVRE (SEM +18)</option>
+</select>
+<select id="status-filter" style="margin-left:10px">
+    <option value="all">QUALQUER STATUS</option>
+    <option value="online">ONLINE</option>
+    <option value="relay">RELAY</option>
+    <option value="vod">VOD</option>
+    <option value="offline">OFFLINE</option>
+</select>
                     </div>
                     <div class="btn-group">
                         <button class="btn-primary" id="btn-start-all">

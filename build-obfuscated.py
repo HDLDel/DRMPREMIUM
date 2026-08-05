@@ -9,7 +9,7 @@ SRC = os.getcwd()
 PROJECT = os.path.basename(SRC)
 DST = os.path.join(SRC, PROJECT)
 
-OBFUSCATE = ['server.js', 'script.js']
+OBFUSCATE = ['server.js', 'script.js', 'login.js']
 
 MINIFY = ['index.html', 'login.html', 'style.css']
 
@@ -124,7 +124,7 @@ def obfuscate_files():
         
         # Adjust options dynamically depending on file target
         ops = OPS.copy()
-        if f == 'script.js':
+        if f in ('script.js', 'login.js'):
             try:
                 target_idx = ops.index('--target')
                 ops[target_idx + 1] = 'browser'

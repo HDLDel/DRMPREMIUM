@@ -20,17 +20,58 @@ function svgIcon(name, size = 15) {
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
+// Escapa HTML para evitar XSS em dados vindos do servidor
+function escapeHtml(str) {
+    if (typeof str !== 'string' && typeof str !== 'number') return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// Helpers para spinner de loading
+function showLoadingSpinner(container) {
+    if (!container) return;
+    container.innerHTML = `<div style="text-align: center; padding: 24px;"><div class="loading-spinner"></div></div>`;
+}
+
+function hideLoadingSpinner(container) {
+    if (container) container.innerHTML = '';
+}
+
+// Faz fetch e redireciona para o login se a sessão expirou
+async function apiFetch(url, options) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        window.location.href = '/login.html';
+        throw new Error('Sessão expirada');
+    }
+    return res;
+}
+
 async function updateStats() {
     try {
-        const res = await fetch('/api/status');
+        const container = document.getElementById('disks-container');
+        if (container) showLoadingSpinner(container);
+        
+        const res = await apiFetch('/api/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         
-        document.getElementById('io-usage').innerText = `${data.io}%`;
-        document.getElementById('cpu-usage').innerText = `${data.cpu}%`;
-        document.getElementById('ram-usage').innerText = `${data.ram}%`;
-        document.getElementById('disk-usage').innerText = `${data.disco}%`;
-        document.getElementById('net-usage').innerText = `${data.rede} Mbps`;
-        document.getElementById('active-streams').innerText = data.activeStreams;
+        const ioEl = document.getElementById('io-usage');
+        const cpuEl = document.getElementById('cpu-usage');
+        const ramEl = document.getElementById('ram-usage');
+        const diskEl = document.getElementById('disk-usage');
+        const netEl = document.getElementById('net-usage');
+        const activeEl = document.getElementById('active-streams');
+        if (ioEl) ioEl.innerText = `${data.io}%`;
+        if (cpuEl) cpuEl.innerText = `${data.cpu}%`;
+        if (ramEl) ramEl.innerText = `${data.ram}%`;
+        if (diskEl) diskEl.innerText = `${data.disco}%`;
+        if (netEl) netEl.innerText = `${data.rede} Mbps`;
+        if (activeEl) activeEl.innerText = data.activeStreams;
 
         updateTrends([
             { id: 'io-usage', value: data.io },
@@ -43,7 +84,7 @@ async function updateStats() {
 
         // Renderizar discos/SSDs
         if (data.disks && data.disks.length > 0) {
-            const container = document.getElementById('disks-container');
+            if (container) hideLoadingSpinner(container);
             if (container) {
                 container.innerHTML = '';
                 data.disks.forEach(disk => {
@@ -60,15 +101,15 @@ async function updateStats() {
                     container.innerHTML += `
                         <div class="disk-card">
                             <div class="disk-head">
-                                <span class="disk-name">Montagem: ${disk.mounted}</span>
-                                <span class="disk-fs">${disk.filesystem}</span>
+                                <span class="disk-name">Montagem: ${escapeHtml(disk.mounted)}</span>
+                                <span class="disk-fs">${escapeHtml(disk.filesystem)}</span>
                             </div>
                             <div class="disk-bar">
                                 <div class="disk-bar-fill ${fillClass}" style="transform: scaleX(${(pctVal / 100).toFixed(3)});"></div>
                             </div>
                             <div class="disk-meta">
-                                <span>Disponível: <strong>${disk.avail}</strong></span>
-                                <span class="disk-usage">${pctVal}% usado de ${disk.size}</span>
+                                <span>Disponível: <strong>${escapeHtml(disk.avail)}</strong></span>
+                                <span class="disk-usage">${pctVal}% usado de ${escapeHtml(disk.size)}</span>
                             </div>
                         </div>
                     `;
@@ -77,12 +118,12 @@ async function updateStats() {
         }
         // Cache status
         const cacheEl = document.getElementById('cache-status');
-        if (data.nocache !== undefined) {
+        if (data.nocache !== undefined && cacheEl) {
             cacheEl.innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
             cacheEl.classList.remove('value-good', 'value-bad');
             cacheEl.classList.add(data.nocache ? 'value-bad' : 'value-good');
             const card = document.getElementById('cache-card');
-            card.title = data.nocache ? 'Clique para ativar cache (recomendado)' : 'Clique para desativar cache (libera RAM)';
+            if (card) card.title = data.nocache ? 'Clique para ativar cache (recomendado)' : 'Clique para desativar cache (libera RAM)';
         }
     } catch (err) {
         console.error('Erro ao buscar telemetria:', err);
@@ -123,9 +164,10 @@ function updateTrends(metrics) {
 
 async function toggleNocache() {
     try {
-        const res = await fetch('/api/toggle-nocache', { method: 'POST' });
+        const res = await apiFetch('/api/toggle-nocache', { method: 'POST' });
         const data = await res.json();
         const el = document.getElementById('cache-status');
+        if (!el) return;
         el.innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
         el.classList.remove('value-good', 'value-bad');
         el.classList.add(data.nocache ? 'value-bad' : 'value-good');
@@ -136,7 +178,7 @@ async function toggleNocache() {
 
 async function logout() {
     try {
-        const res = await fetch('/api/logout', {
+        const res = await apiFetch('/api/logout', {
             method: 'POST'
         });
         if (res.ok) {
@@ -147,19 +189,46 @@ async function logout() {
     }
 }
 
-// Alternância de tema claro/escuro (persistido em localStorage)
+const THEMES = ['dark', 'classic-dark', 'light', 'classic-light'];
+const THEME_NAMES = {
+    'dark': 'Dark Moderno (Azul)',
+    'classic-dark': 'Escuro Clássico (Preto com Verde Neon)',
+    'light': 'Light Moderno (Azul)',
+    'classic-light': 'Claro Clássico (Esmeralda)'
+};
+
+// Restauração do tema salvo
+(function applySavedTheme() {
+    try {
+        const saved = localStorage.getItem('drm-theme');
+        if (saved && THEMES.includes(saved)) {
+            document.documentElement.setAttribute('data-theme', saved);
+            const themeBtn = document.querySelector('.btn-theme');
+            if (themeBtn) themeBtn.setAttribute('title', `Tema: ${THEME_NAMES[saved] || saved}`);
+        }
+    } catch (err) {}
+})();
+
+// Alternância de tema (persistido em localStorage)
 function toggleTheme() {
     const root = document.documentElement;
-    const current = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-    root.setAttribute('data-theme', current);
+    const current = root.getAttribute('data-theme') || 'dark';
+    const nextIdx = (THEMES.indexOf(current) + 1) % THEMES.length;
+    const nextTheme = THEMES[nextIdx];
+    root.setAttribute('data-theme', nextTheme);
     try {
-        localStorage.setItem('drm-theme', current);
-    } catch (err) { /* storage indisponível */ }
+        localStorage.setItem('drm-theme', nextTheme);
+    } catch (err) {}
+
+    const themeBtn = document.querySelector('.btn-theme');
+    if (themeBtn) {
+        themeBtn.setAttribute('title', `Tema: ${THEME_NAMES[nextTheme] || nextTheme}`);
+    }
 }
 
 async function start(id) { 
     try {
-        const res = await fetch('/api/start', {
+        const res = await apiFetch('/api/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
@@ -171,7 +240,7 @@ async function start(id) {
         //     alert(`Erro: ${result.message}`);
         // }
         updateStats();
-        loadAndRenderChannels(document.getElementById('search-input').value);
+        loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
     }
@@ -179,13 +248,13 @@ async function start(id) {
 
 async function stop(id) {
     try {
-        await fetch('/api/stop', {
+        await apiFetch('/api/stop', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
         updateStats(); // This will also call loadAndRenderChannels
-        loadAndRenderChannels(document.getElementById('search-input').value);
+        loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
         console.error('Erro ao parar canal:', err);
     }
@@ -210,7 +279,8 @@ function sortTable(column) {
         currentSortColumn = column;
         currentSortDirection = 'asc';
     }
-    loadAndRenderChannels(document.getElementById('search-input').value);
+        const input = document.getElementById('search-input');
+        loadAndRenderChannels(input ? input.value : '');
 }
 
 function updateSortIcons() {
@@ -229,15 +299,22 @@ function updateSortIcons() {
 // Function to load and render channels
 async function loadAndRenderChannels(filter = '') {
     try {
-        const res = await fetch('/api/channels');
-        let channels = await res.json();
+        const tbl = document.getElementById('channels-table');
+        if (!tbl) return;
+        tbl.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px"><div class="loading-spinner"></div></td></tr>';
+
+        const res = await apiFetch('/api/channels');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const channels = await res.json();
+        if (!Array.isArray(channels)) throw new Error('Resposta inválida');
+        let channelList = channels;
 
         allChannels = channels; // Armazenar todos os canais
 
         // Aplicar filtro de busca
         if (filter) {
-            channels = channels.filter(channel =>
-                channel.name.toLowerCase().includes(filter.toLowerCase()) ||
+            channelList = channels.filter(channel =>
+                (channel.name || '').toLowerCase().includes(filter.toLowerCase()) ||
                 channel.id.toString().includes(filter)
             );
         }
@@ -246,13 +323,20 @@ async function loadAndRenderChannels(filter = '') {
         const filterSelect = document.getElementById('filter-select');
         const filterType = filterSelect ? filterSelect.value : 'all';
         if (filterType === '18') {
-            channels = channels.filter(channel => channel.is18);
+            channelList = channelList.filter(channel => channel.is18);
         } else if (filterType === 'family') {
-            channels = channels.filter(channel => !channel.is18);
+            channelList = channelList.filter(channel => !channel.is18);
+        }
+
+        // Aplicar filtro por status (online/offline/relay/vod)
+        const statusSelect = document.getElementById('status-filter');
+        const statusFilter = statusSelect ? statusSelect.value : 'all';
+        if (statusFilter !== 'all') {
+            channelList = channelList.filter(channel => channel.status === statusFilter);
         }
 
         // Lógica de ordenação
-        channels.sort((a, b) => {
+        channelList.sort((a, b) => {
             let valA = a[currentSortColumn];
             let valB = b[currentSortColumn];
 
@@ -269,24 +353,25 @@ async function loadAndRenderChannels(filter = '') {
         updateSortIcons();
 
         const hint = document.getElementById('channel-count-hint');
-        if (hint) hint.innerText = channels.length + ' CANAIS';
+        if (hint) hint.innerText = channelList.length + ' CANAIS';
 
-        const tableBody = document.getElementById('channels-table');
-        tableBody.innerHTML = ''; // Clear existing rows
+        const tbl2 = document.getElementById('channels-table');
+        if (!tbl2) return;
+        tbl2.innerHTML = ''; // Clear existing rows
 
-        if (channels.length === 0) {
+        if (channelList.length === 0) {
             const message = filter ? 'Nenhum canal encontrado para a busca.' : 'Nenhum canal configurado. Crie um novo!';
-            tableBody.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
+            tbl2.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
             return;
         }
 
-        channels.forEach(channel => {
-            const row = tableBody.insertRow();
+        channelList.forEach(channel => {
+            const row = tbl2.insertRow();
             const idCell = row.insertCell();
             idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
             
             const nameCell = row.insertCell();
-            let nameHTML = channel.name;
+            let nameHTML = escapeHtml(channel.name);
             if (channel.is18) {
                 nameHTML += ` <span class="badge-18" data-action="toggle18" data-id="${channel.id}" title="Clique para desmarcar +18">18+</span>`;
             } else {
@@ -339,13 +424,13 @@ async function loadAndRenderChannels(filter = '') {
 
             // Assistir se ativo (Abre Pop-up Modal com Player HLS)
             if (channel.status !== 'offline') {
-                actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${channel.name.replace(/"/g, '&quot;')}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
+                actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
             }
             
             // Ações padrão
             actionBtns += " " +
                 `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
-                `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${channel.name.replace(/"/g, '&quot;')}" title="Logs">${svgIcon('logs')}</button> ` +
+                `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
                 `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
             
             actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
@@ -389,20 +474,20 @@ async function deleteChannel(id, status) {
 
     if (!confirm('Tem certeza que deseja excluir este canal e todos os seus arquivos temporários?')) return;
     try {
-        const res = await fetch('/api/delete', {
+        const res = await apiFetch('/api/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
 
         if (!res.ok) {
-            const errorData = await res.json();
-            alert(`Erro: ${errorData.message}`);
+            const errorData = await res.json().catch(() => ({}));
+            alert(`Erro: ${errorData.message || 'desconhecido'}`);
             return;
         }
 
         updateStats(); // Isso forçará a atualização da lista de canais
-        loadAndRenderChannels(document.getElementById('search-input').value);
+        loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
         console.error('Erro ao excluir canal:', err);
         alert('Erro ao excluir o canal.');
@@ -505,7 +590,7 @@ async function loadVideoSourceOptions(selectedValue = "") {
     const input = document.getElementById('video-source-input');
     const toggleLink = document.getElementById('toggle-source-type');
     try {
-        const res = await fetch('/api/videosources');
+        const res = await apiFetch('/api/videosources');
         if (!res.ok) throw new Error('Falha na resposta do servidor');
         
         const folders = await res.json();
@@ -593,18 +678,19 @@ async function createOrEditChannel() {
     }
 
     try {
-        const res = await fetch(endpoint, {
+        const res = await apiFetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
         if (result.status === 'success') {
             alert(editingChannelId !== null ? "Canal atualizado com sucesso!" : "Canal criado com sucesso!");
             hideCreateChannelModal();
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            const input = document.getElementById('search-input');
+            loadAndRenderChannels(input ? input.value : '');
         } else {
-            alert("Erro: " + result.message);
+            alert("Erro: " + (result.message || 'desconhecido'));
         }
     } catch (err) {
         alert('Falha ao conectar com o servidor.');
@@ -614,8 +700,8 @@ async function createOrEditChannel() {
 
 // Função para busca
 function handleSearch() {
-    const filter = document.getElementById('search-input').value;
-    loadAndRenderChannels(filter);
+    const input = document.getElementById('search-input');
+    loadAndRenderChannels(input ? input.value : '');
 }
 
 // Função para scroll to top
@@ -623,24 +709,20 @@ function scrollToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// Event listeners
-document.getElementById('search-input').addEventListener('input', handleSearch);
-
 window.addEventListener('scroll', () => {
     const scrollToTopBtn = document.getElementById('scroll-to-top');
-    if (window.scrollY > 100) {
-        scrollToTopBtn.style.display = 'block';
-    } else {
-        scrollToTopBtn.style.display = 'none';
-    }
+    if (!scrollToTopBtn) return;
+    scrollToTopBtn.style.display = window.scrollY > 100 ? 'block' : 'none';
 });
 
 // Alternar abas
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.querySelector(`.tab-btn[onclick*="${tab}"]`).classList.add('active');
-    document.getElementById(`tab-${tab}`).classList.add('active');
+    const btn = document.querySelector(`#btn-tab-${tab}`);
+    const content = document.getElementById(`tab-${tab}`);
+    if (btn) btn.classList.add('active');
+    if (content) content.classList.add('active');
     if (tab === 'seguranca') {
         loadLoginAttempts();
         loadBlockedIPs();
@@ -652,8 +734,12 @@ function switchTab(tab) {
 // Funções da aba Segurança
 async function loadLoginAttempts() {
     const tbody = document.getElementById('login-attempts-table');
+    if (!tbody) return;
+    showLoadingSpinner(tbody);
+    
     try {
-        const res = await fetch('/api/login-attempts');
+        const res = await apiFetch('/api/login-attempts');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const attempts = await res.json();
         if (!attempts.length) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Nenhuma tentativa registrada ainda.</td></tr>';
@@ -661,12 +747,12 @@ async function loadLoginAttempts() {
         }
         tbody.innerHTML = attempts.map(a => `
             <tr class="${a.success ? '' : 'row-fail'}">
-                <td><code>${a.ip}</code></td>
-                <td>${a.user}</td>
+                <td><code>${escapeHtml(a.ip)}</code></td>
+                <td>${escapeHtml(a.user)}</td>
                 <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
                 <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
                      <td>
-                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${a.ip}">BLOQUEAR</button>
+                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -678,8 +764,12 @@ async function loadLoginAttempts() {
 async function loadBlockedIPs() {
     const tbody = document.getElementById('blocked-ips-table');
     const count = document.getElementById('blocked-count');
+    if (!tbody) return;
+    showLoadingSpinner(tbody);
+    
     try {
-        const res = await fetch('/api/blocked-ips');
+        const res = await apiFetch('/api/blocked-ips');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const ips = await res.json();
         count.textContent = ips.length;
         if (!ips.length) {
@@ -688,9 +778,9 @@ async function loadBlockedIPs() {
         }
         tbody.innerHTML = ips.map(ip => `
             <tr>
-                <td><code>${ip}</code></td>
+                <td><code>${escapeHtml(ip)}</code></td>
                 <td>
-                    <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${ip}">DESBLOQUEAR</button>
+                    <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${escapeHtml(ip)}">DESBLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -701,8 +791,12 @@ async function loadBlockedIPs() {
 
 async function loadTopAttackers() {
     const tbody = document.getElementById('top-attackers-table');
+    if (!tbody) return;
+    showLoadingSpinner(tbody);
+    
     try {
-        const res = await fetch('/api/top-attackers');
+        const res = await apiFetch('/api/top-attackers');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const attackers = await res.json();
         if (!attackers.length) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Nenhum dado ainda.</td></tr>';
@@ -710,13 +804,13 @@ async function loadTopAttackers() {
         }
         tbody.innerHTML = attackers.map(a => `
             <tr class="${a.fails >= a.total * 0.5 && a.total >= 3 ? 'row-attacker' : ''}">
-                <td><code>${a.ip}</code></td>
+                <td><code>${escapeHtml(a.ip)}</code></td>
                 <td class="stat-num">${a.total}</td>
                 <td class="${a.fails > 0 ? 'stat-fail' : 'stat-muted'}">${a.fails}</td>
                 <td class="stat-ok">${a.successes}</td>
                 <td>${new Date(a.lastAttempt).toLocaleString('pt-BR')}</td>
                 <td>
-                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${a.ip}">BLOQUEAR</button>
+                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
@@ -727,16 +821,21 @@ async function loadTopAttackers() {
 
 async function loadNginxAccess() {
     const tbody = document.getElementById('nginx-access-table');
+    if (tbody) showLoadingSpinner(tbody);
+    
     try {
         const [accessRes, statsRes] = await Promise.all([
-            fetch('/api/nginx-access'),
-            fetch('/api/nginx-access/stats')
+            apiFetch('/api/nginx-access'),
+            apiFetch('/api/nginx-access/stats')
         ]);
+        if (!accessRes.ok || !statsRes.ok) throw new Error('HTTP');
         const accessData = await accessRes.json();
         const statsData = await statsRes.json();
 
-        document.getElementById('access-unique-ips').textContent = statsData.totalIPs;
-        document.getElementById('access-total-requests').textContent = statsData.totalRequests;
+        const ipsEl = document.getElementById('access-unique-ips');
+        const reqEl = document.getElementById('access-total-requests');
+        if (ipsEl) ipsEl.textContent = statsData.totalIPs;
+        if (reqEl) reqEl.textContent = statsData.totalRequests;
 
         if (!accessData.length) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Nenhum acesso registrado nos últimos 60 minutos.</td></tr>';
@@ -749,11 +848,11 @@ async function loadNginxAccess() {
             ).join('');
             const more = entry.channels.length > 5 ? ` <span class="stat-kicker">+${entry.channels.length - 5}</span>` : '';
             return `<tr>
-                <td><code>${entry.ip}</code></td>
+                <td><code>${escapeHtml(entry.ip)}</code></td>
                 <td>${channelsStr}${more}</td>
                 <td class="stat-num">${entry.totalHits}</td>
                 <td>${new Date(entry.lastSeen).toLocaleString('pt-BR')}</td>
-                <td><button class="btn-danger btn-small" data-action="blockIP" data-ip="${entry.ip}">BLOQUEAR</button></td>
+                <td><button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(entry.ip)}">BLOQUEAR</button></td>
             </tr>`;
         }).join('');
     } catch (e) {
@@ -772,17 +871,18 @@ setInterval(async () => {
 async function blockIP(ip) {
     if (!confirm(`Bloquear o IP ${ip}?`)) return;
     try {
-        const res = await fetch('/api/block-ip', {
+        const res = await apiFetch('/api/block-ip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip })
         });
+        const data = await res.json().catch(() => ({}));
         if (res.ok) {
             loadLoginAttempts();
             loadBlockedIPs();
             loadTopAttackers();
         } else {
-            alert('Erro ao bloquear IP');
+            alert('Erro ao bloquear IP: ' + (data.message || 'desconhecido'));
         }
     } catch (e) {
         alert('Erro ao bloquear IP');
@@ -792,17 +892,18 @@ async function blockIP(ip) {
 async function unblockIP(ip) {
     if (!confirm(`Desbloquear o IP ${ip}?`)) return;
     try {
-        const res = await fetch('/api/unblock-ip', {
+        const res = await apiFetch('/api/unblock-ip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip })
         });
+        const data = await res.json().catch(() => ({}));
         if (res.ok) {
             loadBlockedIPs();
             loadLoginAttempts();
             loadTopAttackers();
         } else {
-            alert('Erro ao desbloquear IP');
+            alert('Erro ao desbloquear IP: ' + (data.message || 'desconhecido'));
         }
     } catch (e) {
         alert('Erro ao desbloquear IP');
@@ -811,7 +912,10 @@ async function unblockIP(ip) {
 
 // Atualização automática dos gráficos de hardware
 setInterval(updateStats, 5000);
-setInterval(() => loadAndRenderChannels(document.getElementById('search-input').value), 10000);
+setInterval(() => {
+    const input = document.getElementById('search-input');
+    loadAndRenderChannels(input ? input.value : '');
+}, 10000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load
 
@@ -833,13 +937,13 @@ setInterval(updateHeaderClock, 1000);
 // Alternar status +18 de forma dinâmica por clique
 async function toggle18(id) {
     try {
-        const res = await fetch('/api/toggle18', {
+        const res = await apiFetch('/api/toggle18', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
         if (res.ok) {
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         }
     } catch (err) {
         console.error('Erro ao alternar status +18:', err);
@@ -863,12 +967,12 @@ function copyM3ULink() {
 async function startAll() {
     if (!confirm('Tem certeza que deseja INICIAR todos os canais offline?')) return;
     try {
-        const res = await fetch('/api/startall', {
+        const res = await apiFetch('/api/startall', {
             method: 'POST'
         });
         if (res.ok) {
             updateStats();
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
             alert('Erro ao iniciar todos os canais.');
         }
@@ -880,12 +984,12 @@ async function startAll() {
 async function stopAll() {
     if (!confirm('Tem certeza que deseja PARAR todos os canais ativos?')) return;
     try {
-        const res = await fetch('/api/stopall', {
+        const res = await apiFetch('/api/stopall', {
             method: 'POST'
         });
         if (res.ok) {
             updateStats();
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
             alert('Erro ao parar todos os canais.');
         }
@@ -908,17 +1012,17 @@ async function toggleVod(id) {
     if (!confirm(confirmMsg)) return;
 
     try {
-        const res = await fetch('/api/toggle-vod', {
+        const res = await apiFetch('/api/toggle-vod', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (res.ok && data.status === 'success') {
             alert(`Canal ${id} alternado para modo ${data.mode.toUpperCase()} com sucesso!`);
             updateStats();
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
             alert(`Erro: ${data.message || 'Falha ao alternar modo VOD'}`);
         }
@@ -946,7 +1050,8 @@ function onChannelModeChange() {
 async function loadRelayM3UFiles() {
     const select = document.getElementById('relay-m3u-select');
     try {
-        const res = await fetch('/api/relay-m3u-files');
+        const res = await apiFetch('/api/relay-m3u-files');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const files = await res.json();
         select.innerHTML = '<option value="">-- Selecione para importar links --</option>';
         files.forEach(f => {
@@ -964,7 +1069,8 @@ async function onM3UFileSelect() {
     const file = document.getElementById('relay-m3u-select').value;
     if (!file) return;
     try {
-        const res = await fetch("/api/read-m3u?file=" + encodeURIComponent(file));
+        const res = await apiFetch("/api/read-m3u?file=" + encodeURIComponent(file));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (data.urls && data.urls.length > 0) {
             const textarea = document.getElementById('relay-urls-input');
@@ -980,14 +1086,14 @@ async function onM3UFileSelect() {
 
 async function advanceRelay(id) {
     try {
-        const res = await fetch('/api/relay-advance', {
+        const res = await apiFetch('/api/relay-advance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
         if (result.status === 'success') {
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
             alert('Erro ao avançar vídeo.');
         }
@@ -1026,18 +1132,18 @@ async function submitSwitchMode() {
     if (switchModeChannelId === null) return;
     const newMode = document.getElementById('fast-mode-select').value;
     try {
-        const res = await fetch('/api/switch-mode', {
+        const res = await apiFetch('/api/switch-mode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: switchModeChannelId, newMode })
         });
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
         if (result.status === 'success') {
             hideSwitchModeModal();
             updateStats();
-            loadAndRenderChannels(document.getElementById('search-input').value);
+            loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
-            alert("Erro: " + result.message);
+            alert("Erro: " + (result.message || 'desconhecido'));
         }
     } catch (e) {
         alert('Erro ao alternar modo no servidor.');
@@ -1143,8 +1249,8 @@ function copyCurrentPlayerUrl() {
 async function clearAllLogs() {
     if (!confirm('Deseja realmente limpar e resetar os logs de erros de TODOS os canais?')) return;
     try {
-        const res = await fetch('/api/clear-logs', { method: 'POST' });
-        const data = await res.json();
+        const res = await apiFetch('/api/clear-logs', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
         if (res.ok && data.status === 'success') {
             alert(`Logs limpos com sucesso!\n\n${data.count} arquivo(s) de log de canais foram esvaziados e resetados.`);
         } else {
@@ -1181,6 +1287,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Filter select & Search input
     const filterSelect = document.getElementById('filter-select');
     if (filterSelect) filterSelect.addEventListener('change', handleSearch);
+
+    const statusFilter = document.getElementById('status-filter');
+    if (statusFilter) statusFilter.addEventListener('change', handleSearch);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', handleSearch);
