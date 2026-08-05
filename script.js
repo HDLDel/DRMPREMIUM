@@ -4,6 +4,22 @@
 
 let allChannels = []; // Armazenar todos os canais para busca
 
+// ─── Ícones SVG (sistema de ícones consistente do painel) ───
+const ICON_PATHS = {
+    play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+    stop: '<rect x="6" y="6" width="12" height="12"/>',
+    next: '<polygon points="1 4 10 12 1 20 1 4"/><polygon points="11 4 20 12 11 20 11 4"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    edit: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+    logs: '<polyline points="8 6 13 6 13 10 8 10 8 6"/><polyline points="8 12 18 12 18 16 8 16 8 12"/><path d="M13 10h3"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'
+};
+
+function svgIcon(name, size = 15) {
+    const path = ICON_PATHS[name] || '';
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+}
+
 async function updateStats() {
     try {
         const res = await fetch('/api/status');
@@ -25,25 +41,25 @@ async function updateStats() {
                     const pctVal = parseInt(disk.usePercent) || 0;
                     
                     // Cor da barra de progresso baseado no uso
-                    let barColor = 'var(--accent)'; // Verde
+                    let fillClass = 'fill-green';
                     if (pctVal > 90) {
-                        barColor = '#ff4444'; // Vermelho
+                        fillClass = 'fill-red';
                     } else if (pctVal > 75) {
-                        barColor = '#f59e0b'; // Laranja
+                        fillClass = 'fill-amber';
                     }
                     
                     container.innerHTML += `
-                        <div class="disk-card" style="background: #0a0e14; border: 1px solid #30363d; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span style="font-weight: bold; color: var(--text); font-size: 1.05rem;">Montagem: ${disk.mounted}</span>
-                                <span style="color: #8b949e; font-size: 0.85rem; font-family: monospace;">${disk.filesystem}</span>
+                        <div class="disk-card">
+                            <div class="disk-head">
+                                <span class="disk-name">Montagem: ${disk.mounted}</span>
+                                <span class="disk-fs">${disk.filesystem}</span>
                             </div>
-                            <div style="background: #1f242c; height: 10px; border-radius: 5px; overflow: hidden; width: 100%;">
-                                <div style="background: ${barColor}; width: ${pctVal}%; height: 100%; border-radius: 5px; transition: width 0.5s ease;"></div>
+                            <div class="disk-bar">
+                                <div class="disk-bar-fill ${fillClass}" style="transform: scaleX(${(pctVal / 100).toFixed(3)});"></div>
                             </div>
-                            <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
-                                <span>Disponível: <strong style="color: #00ff99;">${disk.avail}</strong></span>
-                                <span style="color: #8b949e;">${pctVal}% usado de ${disk.size}</span>
+                            <div class="disk-meta">
+                                <span>Disponível: <strong>${disk.avail}</strong></span>
+                                <span class="disk-usage">${pctVal}% usado de ${disk.size}</span>
                             </div>
                         </div>
                     `;
@@ -54,7 +70,8 @@ async function updateStats() {
         const cacheEl = document.getElementById('cache-status');
         if (data.nocache !== undefined) {
             cacheEl.innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
-            cacheEl.style.color = data.nocache ? '#ff4444' : '#00ff99';
+            cacheEl.classList.remove('value-good', 'value-bad');
+            cacheEl.classList.add(data.nocache ? 'value-bad' : 'value-good');
             const card = document.getElementById('cache-card');
             card.title = data.nocache ? 'Clique para ativar cache (recomendado)' : 'Clique para desativar cache (libera RAM)';
         }
@@ -67,8 +84,10 @@ async function toggleNocache() {
     try {
         const res = await fetch('/api/toggle-nocache', { method: 'POST' });
         const data = await res.json();
-        document.getElementById('cache-status').innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
-        document.getElementById('cache-status').style.color = data.nocache ? '#ff4444' : '#00ff99';
+        const el = document.getElementById('cache-status');
+        el.innerText = data.nocache ? 'DESLIGADO' : 'LIGADO';
+        el.classList.remove('value-good', 'value-bad');
+        el.classList.add(data.nocache ? 'value-bad' : 'value-good');
     } catch (err) {
         console.error('Erro ao alternar cache:', err);
     }
@@ -198,48 +217,55 @@ async function loadAndRenderChannels(filter = '') {
 
         updateSortIcons();
 
+        const hint = document.getElementById('channel-count-hint');
+        if (hint) hint.innerText = channels.length + ' CANAIS';
+
         const tableBody = document.getElementById('channels-table');
         tableBody.innerHTML = ''; // Clear existing rows
 
         if (channels.length === 0) {
             const message = filter ? 'Nenhum canal encontrado para a busca.' : 'Nenhum canal configurado. Crie um novo!';
-            tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center;">${message}</td></tr>`;
+            tableBody.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
             return;
         }
 
         channels.forEach(channel => {
             const row = tableBody.insertRow();
-            row.insertCell().innerText = channel.id;
+            const idCell = row.insertCell();
+            idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
             
             const nameCell = row.insertCell();
             let nameHTML = channel.name;
             if (channel.is18) {
-                nameHTML += " <span style=\"background:#ff4444; color:white; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; font-weight:bold; cursor:pointer;\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para desmarcar +18\">18+ 🔞</span>";
+                nameHTML += " <span class=\"badge-18\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para desmarcar +18\">18+</span>";
             } else {
-                nameHTML += " <span style=\"border:1px solid #6e7681; color:#8b949e; font-size:0.75em; padding:2px 6px; border-radius:4px; margin-left:8px; cursor:pointer;\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para marcar como +18\">+18?</span>";
+                nameHTML += " <span class=\"badge-18 off\" onclick=\"toggle18(" + channel.id + ")\" title=\"Clique para marcar como +18\">+18?</span>";
             }
             nameCell.innerHTML = nameHTML;
             
             const statusCell = row.insertCell();
-            let statusColor = '#ff4444';
+            let statusClass = 'status-offline';
             let statusText = 'OFFLINE';
             
             if (channel.status === 'online') {
-                statusColor = '#00ff99';
-                statusText = 'LIVE';
+                statusClass = 'status-live';
+                statusText = '● LIVE';
             } else if (channel.status === 'vod') {
-                statusColor = '#3b82f6';
+                statusClass = 'status-vod';
                 statusText = 'VOD';
             } else if (channel.status === 'relay') {
-                statusColor = '#a855f7';
+                statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
                 statusText = channel.relaySubtype === 'loop' 
-                    ? "LOOP (#" + ((channel.currentUrlIndex || 0) + 1) + ")" 
-                    : 'RELAY (SYNC)';
+                    ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
+                    : 'RELAY SYNC';
             }
-            statusCell.innerHTML = "<span style=\"color: " + statusColor + "; font-weight: bold;\">" + statusText + "</span>";
+            statusCell.innerHTML = `<span class="status-badge ${statusClass}">${statusText}</span>`;
             
             const isActive = (channel.status === 'online' || channel.status === 'relay');
-            row.insertCell().innerText = isActive ? formatUptime(channel.uptime) : '-';
+            const uptimeCell = row.insertCell();
+            uptimeCell.innerHTML = isActive
+                ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
+                : `<span class="stat-muted">-</span>`;
             
             const actionsCell = row.insertCell();
             const streamUrl = "/canais/" + channel.id + "/index.m3u8";
@@ -248,31 +274,31 @@ async function loadAndRenderChannels(filter = '') {
             
             // Botão Iniciar/Parar
             if (channel.status === 'offline') {
-                actionBtns += "<button onclick=\"start(" + channel.id + ")\" title=\"Iniciar\" style=\"background:#10b981; color:white;\">▶ Iniciar</button>";
+                actionBtns += "<button class=\"btn-primary btn-icon\" onclick=\"start(" + channel.id + ")\" title=\"Iniciar\">" + svgIcon('play') + "</button>";
             } else {
-                actionBtns += "<button onclick=\"stop(" + channel.id + ")\" class=\"stop\" title=\"Parar\" style=\"background:#ef4444; color:white;\">⏹ Parar</button>";
+                actionBtns += "<button class=\"btn-stop btn-icon\" onclick=\"stop(" + channel.id + ")\" title=\"Parar\">" + svgIcon('stop') + "</button>";
             }
             
             // Botão Avançar (apenas para Relay Loop)
             if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
-                actionBtns += "<button onclick=\"advanceRelay(" + channel.id + ")\" title=\"Próximo Vídeo\" style=\"background:#f59e0b; color:white;\">⏩ Avançar</button>";
+                actionBtns += "<button class=\"btn-edit btn-icon\" onclick=\"advanceRelay(" + channel.id + ")\" title=\"Próximo Vídeo\">" + svgIcon('next') + "</button>";
             }
             
             // Botão M3U (Copiar Link M3U do Canal)
-            actionBtns += "<button class=\"btn-m3u\" onclick=\"copyChannelM3U(" + channel.id + ")\" title=\"Copiar Link M3U\">📋 M3U</button>";
+            actionBtns += "<button class=\"btn-cyan btn-icon\" onclick=\"copyChannelM3U(" + channel.id + ")\" title=\"Copiar Link M3U\">" + svgIcon('link') + "</button>";
 
             // Assistir se ativo (Abre Pop-up Modal com Player HLS)
             if (channel.status !== 'offline') {
-                actionBtns += "<button class=\"btn-watch\" onclick=\"openPlayerModal(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Assistir no Pop-up\">▶ Assistir</button>";
+                actionBtns += "<button class=\"btn-blue btn-icon\" onclick=\"openPlayerModal(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Assistir no Pop-up\">" + svgIcon('play') + " ASSISTIR</button>";
             }
             
             // Ações padrão
             actionBtns += " " +
-                "<button class=\"btn-edit\" onclick=\"showEditChannelModal(" + channel.id + ")\" style=\"background:#d97706; color:white;\" title=\"Editar\">✏️ Editar</button> " +
-                "<button class=\"btn-logs\" onclick=\"viewLogs(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Logs\">📝 Logs</button> " +
-                "<button class=\"btn-delete\" onclick=\"deleteChannel(" + channel.id + ", '" + channel.status + "')\" title=\"Excluir\">✖ Excluir</button>";
+                "<button class=\"btn-edit btn-icon\" onclick=\"showEditChannelModal(" + channel.id + ")\" title=\"Editar\">" + svgIcon('edit') + "</button> " +
+                "<button class=\"btn-neutral btn-icon\" onclick=\"viewLogs(" + channel.id + ", '" + channel.name.replace(/'/g, "\\'") + "')\" title=\"Logs\">" + svgIcon('logs') + "</button> " +
+                "<button class=\"btn-stop btn-icon\" onclick=\"deleteChannel(" + channel.id + ", '" + channel.status + "')\" title=\"Excluir\">" + svgIcon('trash') + "</button>";
             
-            actionsCell.innerHTML = "<div style=\"display:flex; gap:6px; flex-wrap:wrap;\">" + actionBtns + "</div>";
+            actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
         });
     } catch (err) {
         console.error('Erro ao carregar canais:', err);
@@ -580,23 +606,23 @@ async function loadLoginAttempts() {
         const res = await fetch('/api/login-attempts');
         const attempts = await res.json();
         if (!attempts.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;">Nenhuma tentativa registrada ainda.</td></tr>';
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Nenhuma tentativa registrada ainda.</td></tr>';
             return;
         }
         tbody.innerHTML = attempts.map(a => `
-            <tr style="${a.success ? '' : 'background:rgba(255,68,68,0.08)'}">
+            <tr class="${a.success ? '' : 'row-fail'}">
                 <td><code>${a.ip}</code></td>
                 <td>${a.user}</td>
                 <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
-                <td>${a.success ? '<span style="color:#00ff99;font-weight:bold;">✅ Sucesso</span>' : '<span style="color:#ff4444;font-weight:bold;">❌ Falha</span>'}</td>
-                <td style="font-size:0.8em;color:#8b949e;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${a.userAgent}">${a.userAgent || '-'}</td>
+                <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
+                <td class="ua-cell" title="${a.userAgent}">${a.userAgent || '-'}</td>
                 <td>
-                    <button onclick="blockIP('${a.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button>
+                    <button class="btn-danger btn-small" onclick="blockIP('${a.ip}')">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#ff4444;">Erro ao carregar tentativas.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Erro ao carregar tentativas.</td></tr>';
     }
 }
 
@@ -608,19 +634,19 @@ async function loadBlockedIPs() {
         const ips = await res.json();
         count.textContent = ips.length;
         if (!ips.length) {
-            tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#8b949e;">Nenhum IP bloqueado.</td></tr>';
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="2">Nenhum IP bloqueado.</td></tr>';
             return;
         }
         tbody.innerHTML = ips.map(ip => `
             <tr>
                 <td><code>${ip}</code></td>
                 <td>
-                    <button onclick="unblockIP('${ip}')" style="background:#10b981;color:white;padding:4px 8px;font-size:0.8em;">🔓 Desbloquear</button>
+                    <button class="btn-primary btn-small" onclick="unblockIP('${ip}')">DESBLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:#ff4444;">Erro ao carregar IPs bloqueados.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="2">Erro ao carregar IPs bloqueados.</td></tr>';
     }
 }
 
@@ -630,23 +656,23 @@ async function loadTopAttackers() {
         const res = await fetch('/api/top-attackers');
         const attackers = await res.json();
         if (!attackers.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e;">Nenhum dado ainda.</td></tr>';
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Nenhum dado ainda.</td></tr>';
             return;
         }
         tbody.innerHTML = attackers.map(a => `
-            <tr style="${a.fails >= a.total * 0.5 && a.total >= 3 ? 'background:rgba(255,68,68,0.12);' : ''}">
+            <tr class="${a.fails >= a.total * 0.5 && a.total >= 3 ? 'row-attacker' : ''}">
                 <td><code>${a.ip}</code></td>
-                <td style="font-weight:bold;">${a.total}</td>
-                <td style="color:${a.fails > 0 ? '#ff4444' : '#8b949e'};font-weight:bold;">${a.fails}</td>
-                <td style="color:#00ff99;">${a.successes}</td>
-                <td style="font-size:0.85em;">${new Date(a.lastAttempt).toLocaleString('pt-BR')}</td>
+                <td class="stat-num">${a.total}</td>
+                <td class="${a.fails > 0 ? 'stat-fail' : 'stat-muted'}">${a.fails}</td>
+                <td class="stat-ok">${a.successes}</td>
+                <td>${new Date(a.lastAttempt).toLocaleString('pt-BR')}</td>
                 <td>
-                    <button onclick="blockIP('${a.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button>
+                    <button class="btn-danger btn-small" onclick="blockIP('${a.ip}')">BLOQUEAR</button>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#ff4444;">Erro ao carregar.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Erro ao carregar.</td></tr>';
     }
 }
 
@@ -664,25 +690,25 @@ async function loadNginxAccess() {
         document.getElementById('access-total-requests').textContent = statsData.totalRequests;
 
         if (!accessData.length) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b949e;">Nenhum acesso registrado nos últimos 60 minutos.</td></tr>';
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Nenhum acesso registrado nos últimos 60 minutos.</td></tr>';
             return;
         }
 
         tbody.innerHTML = accessData.slice(0, 100).map(entry => {
             const channelsStr = entry.channels.slice(0, 5).map(ch =>
-                `<span style="display:inline-block;background:#1f242c;padding:2px 6px;border-radius:4px;margin:2px;font-size:0.8em;">#${ch.id} (${ch.hits})</span>`
+                `<span class="channel-chip">#<b>${ch.id}</b> (${ch.hits})</span>`
             ).join('');
-            const more = entry.channels.length > 5 ? ` <span style="color:#8b949e;font-size:0.8em;">+${entry.channels.length - 5}</span>` : '';
+            const more = entry.channels.length > 5 ? ` <span class="stat-kicker">+${entry.channels.length - 5}</span>` : '';
             return `<tr>
                 <td><code>${entry.ip}</code></td>
                 <td>${channelsStr}${more}</td>
-                <td style="font-weight:bold;">${entry.totalHits}</td>
-                <td style="font-size:0.85em;">${new Date(entry.lastSeen).toLocaleString('pt-BR')}</td>
-                <td><button onclick="blockIP('${entry.ip}')" style="background:#ef4444;color:white;padding:4px 8px;font-size:0.8em;">🚫 Bloquear</button></td>
+                <td class="stat-num">${entry.totalHits}</td>
+                <td>${new Date(entry.lastSeen).toLocaleString('pt-BR')}</td>
+                <td><button class="btn-danger btn-small" onclick="blockIP('${entry.ip}')">BLOQUEAR</button></td>
             </tr>`;
         }).join('');
     } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ff4444;">Erro ao carregar dados de acesso.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Erro ao carregar dados de acesso.</td></tr>';
     }
 }
 
@@ -739,6 +765,21 @@ setInterval(updateStats, 5000);
 setInterval(() => loadAndRenderChannels(document.getElementById('search-input').value), 10000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load
+
+// Relógio do masthead (teletexto)
+function updateHeaderClock() {
+    const timeEl = document.getElementById('header-time');
+    const dateEl = document.getElementById('header-date');
+    const now = new Date();
+    if (timeEl) {
+        timeEl.innerText = now.toLocaleTimeString('pt-BR', { hour12: false });
+    }
+    if (dateEl) {
+        dateEl.innerText = now.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
+    }
+}
+updateHeaderClock();
+setInterval(updateHeaderClock, 1000);
 
 // Alternar status +18 de forma dinâmica por clique
 async function toggle18(id) {
@@ -964,7 +1005,7 @@ function copyChannelM3U(channelId) {
     const url = `${window.location.protocol}//${window.location.host}/canais/${channelId}/index.m3u8`;
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(() => {
-            alert(`✅ Link M3U do Canal ${channelId} copiado:\n\n${url}`);
+            alert(`Link M3U do Canal ${channelId} copiado:\n\n${url}`);
         }).catch(() => {
             prompt(`Copie o link M3U do Canal ${channelId}:`, url);
         });
@@ -981,7 +1022,7 @@ function openPlayerModal(channelId, channelName) {
     
     currentPlayingStreamUrl = `${window.location.protocol}//${window.location.host}/canais/${channelId}/index.m3u8`;
     
-    if (title) title.innerText = `📺 ${channelName}`;
+    if (title) title.innerText = channelName;
     if (urlLabel) urlLabel.innerText = currentPlayingStreamUrl;
     if (modal) modal.style.display = 'flex';
 
@@ -1056,7 +1097,7 @@ async function clearAllLogs() {
         const res = await fetch('/api/clear-logs', { method: 'POST' });
         const data = await res.json();
         if (res.ok && data.status === 'success') {
-            alert(`✅ Logs limpos com sucesso!\n\n${data.count} arquivo(s) de log de canais foram esvaziados e resetados.`);
+            alert(`Logs limpos com sucesso!\n\n${data.count} arquivo(s) de log de canais foram esvaziados e resetados.`);
         } else {
             alert('Erro ao limpar logs: ' + (data.message || 'Falha no servidor'));
         }

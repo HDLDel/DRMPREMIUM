@@ -2,320 +2,402 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>IPTV Pro - Node Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=1.0.2"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel 24 Horas · DRM Premium</title>
+    <link rel="stylesheet" href="style.css?v=3.0.0">
 </head>
 <body>
+
+    <!-- Masthead -->
     <div class="header">
-        <h1>DRM PREMIUM 24 HORAS</h1>
-        <button class="btn-logout" onclick="logout()">Sair</button>
+        <div class="header-left">
+            <h1>DRM Premium 24 Horas</h1>
+        </div>
+        <div class="header-clock">
+            <div class="clock-date" id="header-date"></div>
+            <div class="clock-block" id="header-time">--:--:--</div>
+            <button class="btn-logout" onclick="logout()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Sair
+            </button>
+        </div>
     </div>
-    
+
+    <!-- Métricas do servidor -->
     <div class="dashboard">
         <div class="card">
+            <div class="tick tick-green"></div>
             <h3>IO</h3>
             <div class="value" id="io-usage">0%</div>
         </div>
         <div class="card">
+            <div class="tick tick-cyan"></div>
             <h3>CPU</h3>
             <div class="value" id="cpu-usage">0%</div>
         </div>
         <div class="card">
+            <div class="tick tick-yellow"></div>
             <h3>RAM</h3>
             <div class="value" id="ram-usage">0%</div>
         </div>
         <div class="card">
+            <div class="tick tick-magenta"></div>
             <h3>Disco</h3>
             <div class="value" id="disk-usage">0%</div>
         </div>
         <div class="card">
+            <div class="tick tick-blue"></div>
             <h3>Rede</h3>
             <div class="value" id="net-usage">0.00 Mbps</div>
         </div>
         <div class="card">
+            <div class="tick tick-green"></div>
             <h3>Streams Ativos</h3>
             <div class="value" id="active-streams">0</div>
         </div>
-        <div class="card" id="cache-card" onclick="toggleNocache()" style="cursor:pointer;">
+        <div class="card" id="cache-card" onclick="toggleNocache()" style="cursor:pointer;" role="button" tabindex="0">
+            <div class="tick tick-yellow"></div>
             <h3>Cache Disco</h3>
             <div class="value" id="cache-status">⋯</div>
         </div>
     </div>
 
-    <!-- Abas de navegação -->
-    <div class="tab-nav">
-        <button class="tab-btn active" onclick="switchTab('canais')">📺 Canais</button>
-        <button class="tab-btn" onclick="switchTab('seguranca')">🔒 Segurança</button>
+    <!-- Navegação por abas -->
+    <div class="tab-nav" role="tablist">
+        <button class="tab-btn active" role="tab" onclick="switchTab('canais')"><span class="page-no">P1</span> Canais</button>
+        <button class="tab-btn" role="tab" onclick="switchTab('seguranca')"><span class="page-no">P2</span> Segurança</button>
     </div>
 
-    <!-- Aba: Canais -->
-    <div id="tab-canais" class="tab-content active">
+    <!-- Aba P1: Canais -->
+    <div id="tab-canais" class="tab-content active" role="tabpanel">
 
-        <!-- Nova seção de Armazenamento SSD -->
-        <div class="storage-section" style="background: var(--card); border-radius: 12px; padding: 20px; border: 1px solid #30363d; margin-bottom: 40px;">
-            <h2 style="margin-top: 0; display: flex; align-items: center; gap: 10px; font-size: 1.4rem;">
-                💾 Armazenamento do Sistema (SSDs/Discos)
-            </h2>
-            <div id="disks-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-                <div style="color: #8b949e;">Carregando informações de armazenamento...</div>
+        <!-- Armazenamento -->
+        <div class="section">
+            <div class="section-bar magenta">
+                <span>Armazenamento do Sistema</span>
+                <span class="bar-hint">SSD / DISCO</span>
+            </div>
+            <div id="disks-container">
+                <div class="loading-msg">Carregando informações de armazenamento...</div>
             </div>
         </div>
 
-        <div class="channel-list">
-            <h2>Canais Disponíveis</h2>
-            <div class="search-bar">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <input type="text" id="search-input" placeholder="Buscar canais...">
-                    <select id="filter-select" onchange="handleSearch()" style="padding: 8px; border-radius: 4px; border: 1px solid #30363d; background: #0a0e14; color: var(--text); font-weight: bold; cursor: pointer; transition: border-color 0.2s;">
-                        <option value="all">📺 Todos os Canais</option>
-                        <option value="18">🔞 Apenas +18</option>
-                        <option value="family">👶 Sem +18 (Livre)</option>
-                    </select>
+        <!-- Canais -->
+        <div class="section">
+            <div class="channel-list">
+                <div class="section-bar cyan">
+                    <span>Canais Disponíveis</span>
+                    <span class="bar-hint" id="channel-count-hint"></span>
                 </div>
-                <div>
-                    <button onclick="startAll()" style="background:#10b981; color:white; margin-right:10px;">▶ Iniciar Todos</button>
-                    <button onclick="stopAll()" style="background:#ef4444; color:white; margin-right:10px;">⏹ Parar Todos</button>
-                    <button onclick="downloadM3U()" style="background:#2563eb; color:white; margin-right:10px;">💾 Exportar M3U (Baixar)</button>
-                    <button onclick="clearAllLogs()" style="background:#dc2626; color:white; margin-right:10px;">🧹 Limpar Logs</button>
-                    <button onclick="showCreateChannelModal()">Criar Novo Canal</button>
-                </div>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th onclick="sortTable('id')">ID <span id="sort-icon-id"></span></th>
-                        <th onclick="sortTable('name')">Nome <span id="sort-icon-name"></span></th>
-                        <th onclick="sortTable('status')">Status <span id="sort-icon-status"></span></th>
-                        <th onclick="sortTable('uptime')">Uptime <span id="sort-icon-uptime"></span></th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody id="channels-table">
-                    <!-- Canais serão carregados aqui via JavaScript -->
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-    <!-- Aba: Segurança -->
-    <div id="tab-seguranca" class="tab-content">
-
-        <div class="channel-list">
-            <h2>🔒 Registro de Tentativas de Login</h2>
-            <div class="search-bar" style="justify-content: space-between;">
-                <div>
-                    <button onclick="loadLoginAttempts()" style="background:#2563eb; color:white;">🔄 Atualizar</button>
-                </div>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <span style="color:#8b949e; font-size:0.9em;">IPs Bloqueados:</span>
-                    <span id="blocked-count" style="color:#ff4444; font-weight:bold;">0</span>
-                </div>
-            </div>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IP</th>
-                            <th>Usuário</th>
-                            <th>Data/Hora</th>
-                            <th>Status</th>
-                            <th>User-Agent</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="login-attempts-table">
-                        <tr><td colspan="6" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="channel-list" style="margin-top:20px;">
-            <h2>⚠️ Top IPs Suspeitos</h2>
-            <p style="color:#8b949e; font-size:0.85em; margin-top:-10px;">IPs com maior número de tentativas de login (ordenado por total decrescente)</p>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IP</th>
-                            <th>Total</th>
-                            <th>❌ Falhas</th>
-                            <th>✅ Sucessos</th>
-                            <th>Última Tentativa</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="top-attackers-table">
-                        <tr><td colspan="6" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="channel-list" style="margin-top:20px;">
-            <h2>🚫 IPs Bloqueados</h2>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IP</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="blocked-ips-table">
-                        <tr><td colspan="2" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="channel-list" style="margin-top:20px;">
-            <h2>📡 Acessos aos Canais</h2>
-            <div class="search-bar" style="justify-content: space-between;">
-                <div>
-                    <button onclick="loadNginxAccess()" style="background:#2563eb; color:white;">🔄 Atualizar</button>
-                </div>
-                <div style="display:flex; gap:15px; align-items:center;">
-                    <span style="color:#8b949e; font-size:0.9em;">🔌 IPs Únicos:</span>
-                    <span id="access-unique-ips" style="color:#58a6ff; font-weight:bold;">0</span>
-                    <span style="color:#8b949e; font-size:0.9em;">📥 Total Requests:</span>
-                    <span id="access-total-requests" style="color:#58a6ff; font-weight:bold;">0</span>
-                </div>
-            </div>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IP</th>
-                            <th>Canais Acessados</th>
-                            <th>Hits</th>
-                            <th>Último Acesso</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="nginx-access-table">
-                        <tr><td colspan="5" style="text-align:center; color:#8b949e;">Carregando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- Modal para Criar/Editar Canal -->
-    <div id="create-channel-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); justify-content:center; align-items:center; z-index:1000; backdrop-filter: blur(4px);">
-        <div style="background:var(--card); padding:30px; border-radius:12px; width:450px; max-width: 90%; border: 1px solid #30363d; box-shadow: 0 8px 32px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto;">
-            <h2 id="modal-title" style="margin-top: 0; color: #58a6ff;">Criar Novo Canal</h2>
-            
-            <label for="new-channel-name" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Nome do Canal:</label>
-            <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h" style="width:calc(100% - 18px); padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-
-            <label for="channel-mode-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Modo de Transmissão:</label>
-            <select id="channel-mode-select" onchange="onChannelModeChange()" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-weight: bold;">
-                <option value="live">📁 Pasta Local (Ao Vivo / MP4s)</option>
-                <option value="relay">📡 Retransmissão (Links Externos / Relay)</option>
-            </select>
-
-            <!-- Seção Pasta Local -->
-            <div id="local-folder-section">
-                <label for="video-source-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Pasta de Vídeos Fonte:</label>
-                <div id="video-source-container" style="margin-bottom: 15px;">
-                    <select id="video-source-select" style="width:100%; padding:10px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                        <option value="">Carregando...</option>
-                    </select>
-                    <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none; width:calc(100% - 18px); padding:10px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                    <div style="margin-top: 5px; text-align: right;">
-                        <a href="#" id="toggle-source-type" style="color: #58a6ff; font-size: 0.85em; text-decoration: none;" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+                <div class="search-bar">
+                    <div class="search-group">
+                        <input type="text" id="search-input" placeholder="Buscar canais...">
+                        <select id="filter-select" onchange="handleSearch()">
+                            <option value="all">TODOS OS CANAIS</option>
+                            <option value="18">APENAS +18</option>
+                            <option value="family">LIVRE (SEM +18)</option>
+                        </select>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn-primary" onclick="startAll()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            Iniciar Todos
+                        </button>
+                        <button class="btn-stop" onclick="stopAll()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
+                            Parar Todos
+                        </button>
+                        <button class="btn-blue" onclick="downloadM3U()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Exportar M3U
+                        </button>
+                        <button class="btn-neutral" onclick="clearAllLogs()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Limpar Logs
+                        </button>
+                        <button class="btn-yellow" onclick="showCreateChannelModal()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            Criar Novo Canal
+                        </button>
                     </div>
                 </div>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th onclick="sortTable('id')">ID <span id="sort-icon-id"></span></th>
+                                <th onclick="sortTable('name')">Nome <span id="sort-icon-name"></span></th>
+                                <th onclick="sortTable('status')">Status <span id="sort-icon-status"></span></th>
+                                <th onclick="sortTable('uptime')">Uptime <span id="sort-icon-uptime"></span></th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="channels-table">
+                            <tr class="empty-row"><td colspan="5">Carregando canais...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </div>
 
-            <!-- Seção Relay -->
-            <div id="relay-section" style="display:none;">
-                <label for="relay-subtype-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Tipo de Relay:</label>
-                <select id="relay-subtype-select" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                    <option value="loop">🔄 Fila de Vídeos (Node Loop - Baixo CPU/Zero Disk)</option>
-                    <option value="sync">⚡ Retransmissão Sincronizada (FFmpeg Sync)</option>
-                </select>
+    </div>
 
-                <label for="relay-m3u-select" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Importar Playlist M3U (VPS /home/drmpremium):</label>
-                <select id="relay-m3u-select" onchange="onM3UFileSelect()" style="width:100%; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text);">
-                    <option value="">-- Selecione para importar links --</option>
-                </select>
+    <!-- Aba P2: Segurança -->
+    <div id="tab-seguranca" class="tab-content" role="tabpanel">
 
-                <label for="relay-urls-input" style="display:block; margin-bottom:5px; color:var(--text); font-weight: bold;">Links de Transmissão (Um por linha):</label>
-                <textarea id="relay-urls-input" placeholder="http://exemplo.com/video1.mp4&#10;http://exemplo.com/video2.mp4" style="width:calc(100% - 18px); height:120px; padding:10px; margin-bottom:15px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-family: monospace; font-size: 0.85em; resize: vertical;"></textarea>
+        <div class="section">
+            <div class="channel-list">
+                <div class="section-bar magenta">
+                    <span>Registro de Tentativas de Login</span>
+                    <span class="bar-hint"><span id="blocked-count" class="stat-fail">0</span> IPs Bloqueados</span>
+                </div>
+                <div class="search-bar">
+                    <div class="btn-group">
+                        <button class="btn-blue" onclick="loadLoginAttempts()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            Atualizar
+                        </button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Usuário</th>
+                                <th>Data/Hora</th>
+                                <th>Status</th>
+                                <th>User-Agent</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="login-attempts-table">
+                            <tr class="empty-row"><td colspan="6">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </div>
 
-            <div style="margin-bottom: 15px;" id="transcode-checkbox-container">
-                <input type="checkbox" id="use-transcode">
-                <label for="use-transcode" style="color:var(--text); font-size:0.9em; cursor: pointer;">Ativar Transcodificação (Maior Estabilidade)</label>
+        <div class="section">
+            <div class="channel-list">
+                <div class="section-bar yellow">
+                    <span>Top IPs Suspeitos</span>
+                    <span class="bar-hint">TENTATIVAS DE LOGIN</span>
+                </div>
+                <p class="hint" style="padding:0 14px;">IPs com maior número de tentativas de login (ordenado por total decrescente)</p>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Total</th>
+                                <th>Falhas</th>
+                                <th>Sucessos</th>
+                                <th>Última Tentativa</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top-attackers-table">
+                            <tr class="empty-row"><td colspan="6">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </div>
 
-            <div style="margin-bottom: 20px;">
-                <input type="checkbox" id="new-channel-is18">
-                <label for="new-channel-is18" style="color:var(--text); font-size:0.9em; font-weight: bold; cursor: pointer;">🔞 Conteúdo +18 (Adulto)</label>
+        <div class="section">
+            <div class="channel-list">
+                <div class="section-bar cyan">
+                    <span>IPs Bloqueados</span>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blocked-ips-table">
+                            <tr class="empty-row"><td colspan="2">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </div>
 
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button id="modal-submit-btn" onclick="createOrEditChannel()" style="background:#1f6feb; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Criar Canal</button>
-                <button onclick="hideCreateChannelModal()" style="background:#30363d; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Cancelar</button>
+        <div class="section">
+            <div class="channel-list">
+                <div class="section-bar green">
+                    <span>Acessos aos Canais</span>
+                    <span class="bar-hint"><span class="stat-blue" id="access-unique-ips">0</span> IPs Únicos · <span class="stat-blue" id="access-total-requests">0</span> Requests</span>
+                </div>
+                <div class="search-bar">
+                    <div class="btn-group">
+                        <button class="btn-blue" onclick="loadNginxAccess()">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            Atualizar
+                        </button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Canais Acessados</th>
+                                <th>Hits</th>
+                                <th>Último Acesso</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nginx-access-table">
+                            <tr class="empty-row"><td colspan="5">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal: Criar/Editar Canal -->
+    <div id="create-channel-modal" class="modal">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h2 id="modal-title">Criar Novo Canal</h2>
+            </div>
+            <div class="modal-body">
+
+                <div class="field">
+                    <label for="new-channel-name">Nome do Canal</label>
+                    <input type="text" id="new-channel-name" placeholder="Ex: Filmes de Ação 24h">
+                </div>
+
+                <div class="field">
+                    <label for="channel-mode-select">Modo de Transmissão</label>
+                    <select id="channel-mode-select" onchange="onChannelModeChange()">
+                        <option value="live">PASTA LOCAL (AO VIVO / MP4s)</option>
+                        <option value="relay">RETRANSMISSÃO (LINKS EXTERNOS / RELAY)</option>
+                    </select>
+                </div>
+
+                <!-- Seção Pasta Local -->
+                <div id="local-folder-section">
+                    <div class="field">
+                        <label for="video-source-select">Pasta de Vídeos Fonte</label>
+                        <div id="video-source-container">
+                            <select id="video-source-select">
+                                <option value="">Carregando...</option>
+                            </select>
+                            <input type="text" id="video-source-input" placeholder="Ex: /home/drmpremium/videos" style="display:none;">
+                            <div style="margin-top:5px; text-align:right;">
+                                <a href="#" id="toggle-source-type" class="link-toggle" onclick="toggleSourceInput(event)">Usar caminho absoluto manual</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Seção Relay -->
+                <div id="relay-section" style="display:none;">
+                    <div class="field">
+                        <label for="relay-subtype-select">Tipo de Relay</label>
+                        <select id="relay-subtype-select">
+                            <option value="loop">FILA DE VÍDEOS (LOOP - BAIXO CPU / ZERO DISK)</option>
+                            <option value="sync">RETRANSMISSÃO SINCRONIZADA (FFMPEG SYNC)</option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="relay-m3u-select">Importar Playlist M3U (VPS /home/drmpremium)</label>
+                        <select id="relay-m3u-select" onchange="onM3UFileSelect()">
+                            <option value="">-- Selecione para importar links --</option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="relay-urls-input">Links de Transmissão (um por linha)</label>
+                        <textarea id="relay-urls-input" placeholder="http://exemplo.com/video1.mp4&#10;http://exemplo.com/video2.mp4"></textarea>
+                    </div>
+                </div>
+
+                <div class="checkbox-row" id="transcode-checkbox-container">
+                    <input type="checkbox" id="use-transcode">
+                    <label for="use-transcode">Ativar Transcodificação (Maior Estabilidade)</label>
+                </div>
+
+                <div class="checkbox-row">
+                    <input type="checkbox" id="new-channel-is18">
+                    <label for="new-channel-is18"><strong>Conteúdo +18 (Adulto)</strong></label>
+                </div>
+
+            </div>
+            <div class="modal-foot">
+                <button id="modal-submit-btn" class="btn-yellow" onclick="createOrEditChannel()">Criar Canal</button>
+                <button class="btn-neutral" onclick="hideCreateChannelModal()">Cancelar</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal para Mudar de Modo Rápido -->
-    <div id="switch-mode-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); justify-content:center; align-items:center; z-index:1000; backdrop-filter: blur(4px);">
-        <div style="background:var(--card); padding:30px; border-radius:12px; width:350px; max-width: 90%; border: 1px solid #30363d; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
-            <h2 style="margin-top: 0; color: #58a6ff; font-size: 1.3rem;">Alterar Modo do Canal</h2>
-            <p id="switch-mode-channel-name" style="color:#8b949e; margin-bottom: 20px; font-weight: bold;"></p>
-            
-            <label for="fast-mode-select" style="display:block; margin-bottom:8px; color:var(--text); font-weight: bold;">Selecione o Novo Modo:</label>
-            <select id="fast-mode-select" style="width:100%; padding:10px; margin-bottom:25px; border-radius:6px; border:1px solid #30363d; background:#0a0e14; color:var(--text); font-weight: bold;">
-                <option value="offline">⏹ Desativado (Offline)</option>
-                <option value="live">📺 Ao Vivo (Pasta Local)</option>
-                <option value="vod">🎥 VOD Estático (Playlist HLS)</option>
-                <option value="relay-loop">🔄 Relay Loop (Sem CPU / Fila)</option>
-                <option value="relay-sync">⚡ Relay Sync (FFmpeg)</option>
-            </select>
+    <!-- Modal: Mudar Modo Rápido -->
+    <div id="switch-mode-modal" class="modal">
+        <div class="modal-card narrow">
+            <div class="modal-head cyan">
+                <h2>Alterar Modo do Canal</h2>
+            </div>
+            <div class="modal-body">
+                <p id="switch-mode-channel-name" class="stat-kicker" style="margin-bottom:14px;"></p>
 
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button onclick="submitSwitchMode()" style="background:#1f6feb; color:white; padding:10px 20px; border-radius:6px; font-weight: bold; cursor: pointer;">Salvar</button>
-                <button onclick="hideSwitchModeModal()" style="background:#30363d; color:white; padding:10px 20px; border-radius:6px; cursor: pointer;">Cancelar</button>
+                <div class="field">
+                    <label for="fast-mode-select">Selecione o Novo Modo</label>
+                    <select id="fast-mode-select">
+                        <option value="offline">DESATIVADO (OFFLINE)</option>
+                        <option value="live">AO VIVO (PASTA LOCAL)</option>
+                        <option value="vod">VOD ESTÁTICO (PLAYLIST HLS)</option>
+                        <option value="relay-loop">RELAY LOOP (SEM CPU / FILA)</option>
+                        <option value="relay-sync">RELAY SYNC (FFMPEG)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn-yellow" onclick="submitSwitchMode()">Salvar</button>
+                <button class="btn-neutral" onclick="hideSwitchModeModal()">Cancelar</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal para Logs -->
-    <div id="logs-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; z-index:1001;">
-        <div style="background:var(--card); padding:20px; border-radius:12px; width:80%; height:80%; display:flex; flex-direction:column;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <h2 id="log-modal-title" style="margin:0;">Logs do Canal</h2>
-                <button onclick="hideLogsModal()" style="background:#555;">Fechar</button>
+    <!-- Modal: Logs -->
+    <div id="logs-modal" class="modal">
+        <div class="modal-card wide">
+            <div class="modal-head magenta">
+                <h2 id="log-modal-title">Logs do Canal</h2>
+                <button class="btn-neutral" onclick="hideLogsModal()">Fechar</button>
             </div>
-            <pre id="log-content" style="flex:1; background:#000; color:#0f0; padding:15px; overflow-y:auto; font-family:monospace; font-size:0.85em; border:1px solid #30363d; margin:0;"></pre>
+            <pre id="log-content" class="log-content"></pre>
         </div>
     </div>
 
-    <!-- Modal Pop-up do Player de Vídeo -->
-    <div id="player-modal">
-        <div class="player-card">
-            <div class="player-header">
-                <h2 id="player-modal-title">📺 Reproduzindo Canal</h2>
-                <button onclick="closePlayerModal()" style="background:#ef4444; color:white; padding:6px 14px; border-radius:6px; border:none; cursor:pointer; font-weight:bold;">✖ Fechar</button>
+    <!-- Modal: Player de Vídeo -->
+    <div id="player-modal" class="modal">
+        <div class="modal-card player">
+            <div class="modal-head" style="padding:0;">
+                <h2 id="player-modal-title">Reproduzindo Canal</h2>
+                <button class="btn-stop" onclick="closePlayerModal()">Fechar</button>
             </div>
             <video id="hls-video-player" class="player-video" controls autoplay></video>
             <div class="player-footer">
-                <span id="player-stream-url"></span>
-                <button onclick="copyCurrentPlayerUrl()" style="background:#30363d; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">📋 Copiar Link</button>
+                <span class="player-url" id="player-stream-url"></span>
+                <button class="btn-cyan btn-small" onclick="copyCurrentPlayerUrl()">Copiar Link</button>
             </div>
         </div>
     </div>
 
-    <button id="scroll-to-top" onclick="scrollToTop()">↑</button>
+    <button id="scroll-to-top" onclick="scrollToTop()" aria-label="Voltar ao topo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+    </button>
 
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="script.js?v=1.0.3"></script>
+    <script src="script.js?v=3.0.0"></script>
 </body>
 </html>

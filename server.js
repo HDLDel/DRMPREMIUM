@@ -1061,7 +1061,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Bloqueio Global: Se não autenticado por Cookie de Sessão, nega acesso (Redireciona páginas para /login.html e bloqueia APIs com 401)
-    if (!isAuth && !(url.pathname === '/login.html' || url.pathname.includes('.css') || url.pathname.startsWith('/canais/'))) {
+    if (!isAuth && !(url.pathname === '/login.html' || url.pathname.includes('.css') || url.pathname.startsWith('/fonts/') || url.pathname.startsWith('/canais/'))) {
         if (url.pathname.startsWith('/api/')) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ status: 'error', message: 'Sessão inválida ou expirada. Faça login novamente.' }));
@@ -2230,6 +2230,9 @@ const server = http.createServer(async (req, res) => {
                 '.html': 'text/html', 
                 '.js': 'text/javascript', 
                 '.css': 'text/css',
+                '.ttf': 'font/ttf',
+                '.woff': 'font/woff',
+                '.woff2': 'font/woff2',
                 '.m3u8': 'application/vnd.apple.mpegurl',
                 '.ts': 'video/MP2T',
                 '.mp4': 'video/mp4'

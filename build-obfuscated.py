@@ -18,7 +18,7 @@ STATIC = [
     'nginx_iptv.conf',
 ]
 
-COPY_DIRS = []
+COPY_DIRS = ['fonts']
 
 EXCLUDE = {
     '.git', '.agents', 'logs', '24HORAS', 'canais',
