@@ -38,7 +38,9 @@ function showLoadingSpinner(container) {
 }
 
 function hideLoadingSpinner(container) {
-    if (container) container.innerHTML = '';
+    if (!container) return;
+    const spinner = container.querySelector('.loading-spinner');
+    if (spinner) spinner.parentElement.remove();
 }
 
 // Faz fetch e redireciona para o login se a sessão expirou
@@ -51,11 +53,122 @@ async function apiFetch(url, options) {
     return res;
 }
 
+const diskCardCache = new Map();
+let diskCardsInitialized = false;
+let pendingDiskUpdates = null;
+let diskUpdateFrame = null;
+
+function getDiskFillClass(percent) {
+    if (percent > 90) return 'fill-red';
+    if (percent > 75) return 'fill-amber';
+    return 'fill-green';
+}
+
+function cacheDiskCard(card) {
+    const idx = Number(card.dataset.diskIdx);
+    diskCardCache.set(idx, {
+        fill: card.querySelector('.disk-bar-fill'),
+        avail: card.querySelector('.disk-meta strong'),
+        usage: card.querySelector('.disk-usage')
+    });
+}
+
+function createDiskCard(disk, idx) {
+    const percent = parseInt(disk.usePercent, 10) || 0;
+    const card = document.createElement('div');
+    card.className = 'disk-card';
+    card.dataset.diskIdx = idx;
+
+    const head = document.createElement('div');
+    head.className = 'disk-head';
+    const name = document.createElement('span');
+    name.className = 'disk-name';
+    name.textContent = `Montagem: ${disk.mounted || ''}`;
+    const filesystem = document.createElement('span');
+    filesystem.className = 'disk-fs';
+    filesystem.textContent = disk.filesystem || '';
+    head.append(name, filesystem);
+
+    const bar = document.createElement('div');
+    bar.className = 'disk-bar';
+    const fill = document.createElement('div');
+    fill.className = `disk-bar-fill ${getDiskFillClass(percent)}`;
+    fill.style.transform = `scaleX(${(percent / 100).toFixed(3)})`;
+    bar.appendChild(fill);
+
+    const meta = document.createElement('div');
+    meta.className = 'disk-meta';
+    const available = document.createElement('span');
+    available.append('Disponível: ');
+    const availableValue = document.createElement('strong');
+    availableValue.textContent = disk.avail || '';
+    available.appendChild(availableValue);
+    const usage = document.createElement('span');
+    usage.className = 'disk-usage';
+    usage.textContent = `${percent}% usado de ${disk.size || ''}`;
+    meta.append(available, usage);
+
+    card.append(head, bar, meta);
+    return card;
+}
+
+function ensureDiskCards(disks) {
+    const container = document.getElementById('disks-container');
+    if (!container) return;
+
+    if (!diskCardsInitialized) {
+        container.replaceChildren();
+        diskCardsInitialized = true;
+    }
+
+    disks.forEach((disk, idx) => {
+        if (diskCardCache.has(idx)) return;
+        const card = createDiskCard(disk, idx);
+        container.appendChild(card);
+        cacheDiskCard(card);
+    });
+}
+
+function applyDiskUpdates(disks) {
+    disks.forEach((disk, idx) => {
+        const refs = diskCardCache.get(idx);
+        if (!refs) return;
+
+        const percent = parseInt(disk.usePercent, 10) || 0;
+        const transform = `scaleX(${(percent / 100).toFixed(3)})`;
+        const fillClass = `disk-bar-fill ${getDiskFillClass(percent)}`;
+        const available = disk.avail || '';
+        const usage = `${percent}% usado de ${disk.size || ''}`;
+
+        if (refs.fill && refs.fill.style.transform !== transform) {
+            refs.fill.style.transform = transform;
+        }
+        if (refs.fill && refs.fill.className !== fillClass) {
+            refs.fill.className = fillClass;
+        }
+        if (refs.avail && refs.avail.textContent !== available) {
+            refs.avail.textContent = available;
+        }
+        if (refs.usage && refs.usage.textContent !== usage) {
+            refs.usage.textContent = usage;
+        }
+    });
+}
+
+function scheduleDiskUpdates(disks) {
+    pendingDiskUpdates = disks;
+    if (diskUpdateFrame !== null) return;
+
+    diskUpdateFrame = requestAnimationFrame(() => {
+        diskUpdateFrame = null;
+        const updates = pendingDiskUpdates;
+        pendingDiskUpdates = null;
+        if (updates) applyDiskUpdates(updates);
+    });
+}
+
 async function updateStats() {
     try {
-        const container = document.getElementById('disks-container');
-        if (container) showLoadingSpinner(container);
-        
         const res = await apiFetch('/api/status');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
@@ -82,39 +195,10 @@ async function updateStats() {
             { id: 'active-streams', value: data.activeStreams, inverse: true }
         ]);
 
-        // Renderizar discos/SSDs
+        // Criar a estrutura apenas uma vez e atualizar os valores no próximo frame.
         if (data.disks && data.disks.length > 0) {
-            if (container) hideLoadingSpinner(container);
-            if (container) {
-                container.innerHTML = '';
-                data.disks.forEach(disk => {
-                    const pctVal = parseInt(disk.usePercent) || 0;
-                    
-                    // Cor da barra de progresso baseado no uso
-                    let fillClass = 'fill-green';
-                    if (pctVal > 90) {
-                        fillClass = 'fill-red';
-                    } else if (pctVal > 75) {
-                        fillClass = 'fill-amber';
-                    }
-                    
-                    container.innerHTML += `
-                        <div class="disk-card">
-                            <div class="disk-head">
-                                <span class="disk-name">Montagem: ${escapeHtml(disk.mounted)}</span>
-                                <span class="disk-fs">${escapeHtml(disk.filesystem)}</span>
-                            </div>
-                            <div class="disk-bar">
-                                <div class="disk-bar-fill ${fillClass}" style="transform: scaleX(${(pctVal / 100).toFixed(3)});"></div>
-                            </div>
-                            <div class="disk-meta">
-                                <span>Disponível: <strong>${escapeHtml(disk.avail)}</strong></span>
-                                <span class="disk-usage">${pctVal}% usado de ${escapeHtml(disk.size)}</span>
-                            </div>
-                        </div>
-                    `;
-                });
-            }
+            ensureDiskCards(data.disks);
+            scheduleDiskUpdates(data.disks);
         }
         // Cache status
         const cacheEl = document.getElementById('cache-status');
@@ -296,26 +380,35 @@ function updateSortIcons() {
     });
 }
 
+function isAdultChannel(channel) {
+    const value = channel.is18;
+    return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+}
+
+function getChannelStatus(channel) {
+    return String(channel.status || channel.mode || '').toLowerCase();
+}
+
 // Function to load and render channels
 async function loadAndRenderChannels(filter = '') {
     try {
         const tbl = document.getElementById('channels-table');
         if (!tbl) return;
-        tbl.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px"><div class="loading-spinner"></div></td></tr>';
 
         const res = await apiFetch('/api/channels');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const channels = await res.json();
         if (!Array.isArray(channels)) throw new Error('Resposta inválida');
-        let channelList = channels;
+        let channelList = [...channels];
 
-        allChannels = channels; // Armazenar todos os canais
+        allChannels = channels;
 
         // Aplicar filtro de busca
-        if (filter) {
+        const searchTerm = String(filter).trim().toLowerCase();
+        if (searchTerm) {
             channelList = channels.filter(channel =>
-                (channel.name || '').toLowerCase().includes(filter.toLowerCase()) ||
-                channel.id.toString().includes(filter)
+                String(channel.name || '').toLowerCase().includes(searchTerm) ||
+                String(channel.id ?? '').includes(searchTerm)
             );
         }
 
@@ -323,16 +416,16 @@ async function loadAndRenderChannels(filter = '') {
         const filterSelect = document.getElementById('filter-select');
         const filterType = filterSelect ? filterSelect.value : 'all';
         if (filterType === '18') {
-            channelList = channelList.filter(channel => channel.is18);
+            channelList = channelList.filter(isAdultChannel);
         } else if (filterType === 'family') {
-            channelList = channelList.filter(channel => !channel.is18);
+            channelList = channelList.filter(channel => !isAdultChannel(channel));
         }
 
         // Aplicar filtro por status (online/offline/relay/vod)
         const statusSelect = document.getElementById('status-filter');
         const statusFilter = statusSelect ? statusSelect.value : 'all';
         if (statusFilter !== 'all') {
-            channelList = channelList.filter(channel => channel.status === statusFilter);
+            channelList = channelList.filter(channel => getChannelStatus(channel) === statusFilter);
         }
 
         // Lógica de ordenação
@@ -355,88 +448,153 @@ async function loadAndRenderChannels(filter = '') {
         const hint = document.getElementById('channel-count-hint');
         if (hint) hint.innerText = channelList.length + ' CANAIS';
 
-        const tbl2 = document.getElementById('channels-table');
-        if (!tbl2) return;
-        tbl2.innerHTML = ''; // Clear existing rows
-
+        // Se vazio, mostrar mensagem
         if (channelList.length === 0) {
-            const message = filter ? 'Nenhum canal encontrado para a busca.' : 'Nenhum canal configurado. Crie um novo!';
-            tbl2.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
+            const hasActiveFilter = Boolean(searchTerm) || filterType !== 'all' || statusFilter !== 'all';
+            const message = hasActiveFilter
+                ? 'Nenhum canal corresponde aos filtros atuais.'
+                : 'Nenhum canal configurado. Crie um novo!';
+            tbl.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
             return;
         }
 
-        channelList.forEach(channel => {
-            const row = tbl2.insertRow();
-            const idCell = row.insertCell();
-            idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
-            
-            const nameCell = row.insertCell();
-            let nameHTML = escapeHtml(channel.name);
-            if (channel.is18) {
-                nameHTML += ` <span class="badge-18" data-action="toggle18" data-id="${channel.id}" title="Clique para desmarcar +18">18+</span>`;
-            } else {
-                nameHTML += ` <span class="badge-18 off" data-action="toggle18" data-id="${channel.id}" title="Clique para marcar como +18">+18?</span>`;
-            }
-            nameCell.innerHTML = nameHTML;
-            
-            const statusCell = row.insertCell();
-            let statusClass = 'status-offline';
-            let statusText = 'OFFLINE';
-            
-            if (channel.status === 'online') {
-                statusClass = 'status-live';
-                statusText = '● LIVE';
-            } else if (channel.status === 'vod') {
-                statusClass = 'status-vod';
-                statusText = 'VOD';
-            } else if (channel.status === 'relay') {
-                statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
-                statusText = channel.relaySubtype === 'loop' 
-                    ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
-                    : 'RELAY SYNC';
-            }
-            statusCell.innerHTML = `<span class="status-badge ${statusClass}">${statusText}</span>`;
-            
-            const isActive = (channel.status === 'online' || channel.status === 'relay');
-            const uptimeCell = row.insertCell();
-            uptimeCell.innerHTML = isActive
-                ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
-                : `<span class="stat-muted">-</span>`;
-            
-            const actionsCell = row.insertCell();
-            
-            let actionBtns = '';
-            
-            // Botão Iniciar/Parar
-            if (channel.status === 'offline') {
-                actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${svgIcon('play')}</button>`;
-            } else {
-                actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${svgIcon('stop')}</button>`;
-            }
-            
-            // Botão Avançar (apenas para Relay Loop)
-            if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
-                actionBtns += `<button class="btn-edit btn-icon" data-action="advanceRelay" data-id="${channel.id}" title="Próximo Vídeo">${svgIcon('next')}</button>`;
-            }
-            
-            // Botão M3U (Copiar Link M3U do Canal)
-            actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${svgIcon('link')}</button>`;
+        // Remover msg vazia se existe
+        const emptyRow = tbl.querySelector('tr.empty-row');
+        if (emptyRow) emptyRow.remove();
 
-            // Assistir se ativo (Abre Pop-up Modal com Player HLS)
-            if (channel.status !== 'offline') {
-                actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
-            }
-            
-            // Ações padrão
-            actionBtns += " " +
-                `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
-                `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
-                `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
-            
-            actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
+        // Diff/Patch: mapa de IDs existentes
+        const existingRows = new Map();
+        tbl.querySelectorAll('tr[data-channel-id]').forEach(row => {
+            existingRows.set(row.dataset.channelId, row);
         });
+
+        // Processar canais: atualizar ou criar
+        const validIds = new Set();
+        channelList.forEach(channel => {
+            const channelIdStr = channel.id.toString();
+            validIds.add(channelIdStr);
+            
+            const existingRow = existingRows.get(channelIdStr);
+            if (existingRow) {
+                updateChannelRowContent(existingRow, channel);
+            } else {
+                const newRow = tbl.insertRow();
+                newRow.dataset.channelId = channelIdStr;
+                createChannelRowContent(newRow, channel);
+            }
+        });
+
+        // Remover linhas de canais que não existem mais
+        tbl.querySelectorAll('tr[data-channel-id]').forEach(row => {
+            if (!validIds.has(row.dataset.channelId)) {
+                row.remove();
+            }
+        });
+
     } catch (err) {
         console.error('Erro ao carregar canais:', err);
+    }
+}
+
+function createChannelRowContent(row, channel) {
+    row.innerHTML = '';
+    
+    const idCell = row.insertCell();
+    idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
+    
+    const nameCell = row.insertCell();
+    let nameHTML = escapeHtml(channel.name);
+    if (channel.is18) {
+        nameHTML += ` <span class="badge-18" data-action="toggle18" data-id="${channel.id}" title="Clique para desmarcar +18">18+</span>`;
+    } else {
+        nameHTML += ` <span class="badge-18 off" data-action="toggle18" data-id="${channel.id}" title="Clique para marcar como +18">+18?</span>`;
+    }
+    nameCell.innerHTML = nameHTML;
+    
+    const statusCell = row.insertCell();
+    let statusClass = 'status-offline';
+    let statusText = 'OFFLINE';
+    
+    if (channel.status === 'online') {
+        statusClass = 'status-live';
+        statusText = '● LIVE';
+    } else if (channel.status === 'vod') {
+        statusClass = 'status-vod';
+        statusText = 'VOD';
+    } else if (channel.status === 'relay') {
+        statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
+        statusText = channel.relaySubtype === 'loop' 
+            ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
+            : 'RELAY SYNC';
+    }
+    statusCell.innerHTML = `<span class="status-badge ${statusClass}">${statusText}</span>`;
+    
+    const isActive = (channel.status === 'online' || channel.status === 'relay');
+    const uptimeCell = row.insertCell();
+    uptimeCell.innerHTML = isActive
+        ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
+        : `<span class="stat-muted">-</span>`;
+    
+    const actionsCell = row.insertCell();
+    
+    let actionBtns = '';
+    
+    if (channel.status === 'offline') {
+        actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${svgIcon('play')}</button>`;
+    } else {
+        actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${svgIcon('stop')}</button>`;
+    }
+    
+    if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
+        actionBtns += `<button class="btn-edit btn-icon" data-action="advanceRelay" data-id="${channel.id}" title="Próximo Vídeo">${svgIcon('next')}</button>`;
+    }
+    
+    actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${svgIcon('link')}</button>`;
+
+    if (channel.status !== 'offline') {
+        actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
+    }
+    
+    actionBtns += " " +
+        `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
+        `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
+        `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
+    
+    actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
+}
+
+function updateChannelRowContent(row, channel) {
+    // Atualizar apenas status e uptime (campos que mudam frequentemente)
+    const statusCell = row.cells[2];
+    const uptimeCell = row.cells[3];
+    
+    let statusClass = 'status-offline';
+    let statusText = 'OFFLINE';
+    
+    if (channel.status === 'online') {
+        statusClass = 'status-live';
+        statusText = '● LIVE';
+    } else if (channel.status === 'vod') {
+        statusClass = 'status-vod';
+        statusText = 'VOD';
+    } else if (channel.status === 'relay') {
+        statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
+        statusText = channel.relaySubtype === 'loop' 
+            ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
+            : 'RELAY SYNC';
+    }
+    
+    const newStatusHtml = `<span class="status-badge ${statusClass}">${statusText}</span>`;
+    if (statusCell.innerHTML !== newStatusHtml) {
+        statusCell.innerHTML = newStatusHtml;
+    }
+    
+    const isActive = (channel.status === 'online' || channel.status === 'relay');
+    const newUptimeHtml = isActive
+        ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
+        : `<span class="stat-muted">-</span>`;
+    if (uptimeCell.innerHTML !== newUptimeHtml) {
+        uptimeCell.innerHTML = newUptimeHtml;
     }
 }
 
@@ -504,6 +662,8 @@ function showCreateChannelModal() {
     document.getElementById('modal-submit-btn').innerText = 'Criar Canal';
     document.getElementById('create-channel-modal').style.display = 'flex';
     loadVideoSourceOptions();
+    onChannelModeChange();
+    loadRelayM3UFiles();
 }
 
 function showEditChannelModal(id) {
@@ -735,29 +895,71 @@ function switchTab(tab) {
 async function loadLoginAttempts() {
     const tbody = document.getElementById('login-attempts-table');
     if (!tbody) return;
-    showLoadingSpinner(tbody);
+    
+    const isFirstLoad = tbody.children.length === 0 || tbody.querySelector('.loading-spinner');
+    if (isFirstLoad) showLoadingSpinner(tbody);
     
     try {
         const res = await apiFetch('/api/login-attempts');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const attempts = await res.json();
+        
+        // Identificar tentativa por timestamp (única)
+        const existingRows = new Map();
+        tbody.querySelectorAll('tr[data-timestamp]').forEach(row => {
+            existingRows.set(row.dataset.timestamp, row);
+        });
+        
         if (!attempts.length) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Nenhuma tentativa registrada ainda.</td></tr>';
             return;
         }
-        tbody.innerHTML = attempts.map(a => `
-            <tr class="${a.success ? '' : 'row-fail'}">
-                <td><code>${escapeHtml(a.ip)}</code></td>
-                <td>${escapeHtml(a.user)}</td>
-                <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
-                <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
-                     <td>
-                    <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
-                </td>
-            </tr>
-        `).join('');
+        
+        // Limpar spinner/mensagem vazia se existir
+        const spinner = tbody.querySelector('.loading-spinner');
+        if (spinner) spinner.closest('tr').remove();
+        const emptyRow = tbody.querySelector('tr.empty-row');
+        if (emptyRow && attempts.length > 0) emptyRow.remove();
+        
+        const validTimestamps = new Set();
+        attempts.forEach(a => {
+            const timestamp = new Date(a.timestamp).getTime().toString();
+            validTimestamps.add(timestamp);
+            
+            const existingRow = existingRows.get(timestamp);
+            const newRowHtml = `
+                <tr data-timestamp="${timestamp}" class="${a.success ? '' : 'row-fail'}">
+                    <td><code>${escapeHtml(a.ip)}</code></td>
+                    <td>${escapeHtml(a.user)}</td>
+                    <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
+                    <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
+                    <td>
+                        <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
+                    </td>
+                </tr>
+            `;
+            
+            if (existingRow) {
+                // Atualizar só se mudou (não sobrescrever row-fail vazio)
+                if (existingRow.outerHTML !== newRowHtml.trim()) {
+                    existingRow.outerHTML = newRowHtml;
+                }
+            } else {
+                tbody.insertAdjacentHTML('beforeend', newRowHtml);
+            }
+        });
+        
+        // Remover linhas que não estão mais presentes
+        tbody.querySelectorAll('tr[data-timestamp]').forEach(row => {
+            if (!validTimestamps.has(row.dataset.timestamp)) {
+                row.remove();
+            }
+        });
+        
     } catch (e) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Erro ao carregar tentativas.</td></tr>';
+        if (isFirstLoad) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="6">Erro ao carregar tentativas.</td></tr>';
+        }
     }
 }
 
@@ -765,27 +967,70 @@ async function loadBlockedIPs() {
     const tbody = document.getElementById('blocked-ips-table');
     const count = document.getElementById('blocked-count');
     if (!tbody) return;
-    showLoadingSpinner(tbody);
+    
+    const isFirstLoad = tbody.children.length === 0 || tbody.querySelector('.loading-spinner');
+    if (isFirstLoad) showLoadingSpinner(tbody);
     
     try {
         const res = await apiFetch('/api/blocked-ips');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const ips = await res.json();
-        count.textContent = ips.length;
+        
+        if (count && count.textContent !== ips.length.toString()) {
+            count.textContent = ips.length;
+        }
+        
         if (!ips.length) {
             tbody.innerHTML = '<tr class="empty-row"><td colspan="2">Nenhum IP bloqueado.</td></tr>';
             return;
         }
-        tbody.innerHTML = ips.map(ip => `
-            <tr>
-                <td><code>${escapeHtml(ip)}</code></td>
-                <td>
-                    <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${escapeHtml(ip)}">DESBLOQUEAR</button>
-                </td>
-            </tr>
-        `).join('');
+        
+        // Limpar spinner/empty se existirem
+        const spinner = tbody.querySelector('.loading-spinner');
+        if (spinner) spinner.closest('tr').remove();
+        const emptyRow = tbody.querySelector('tr.empty-row');
+        if (emptyRow && ips.length > 0) emptyRow.remove();
+        
+        // Diff/Patch por IP
+        const existingRows = new Map();
+        tbody.querySelectorAll('tr[data-ip]').forEach(row => {
+            existingRows.set(row.dataset.ip, row);
+        });
+        
+        const validIps = new Set();
+        ips.forEach(ip => {
+            validIps.add(ip);
+            
+            const existingRow = existingRows.get(ip);
+            const newRowHtml = `
+                <tr data-ip="${escapeHtml(ip)}">
+                    <td><code>${escapeHtml(ip)}</code></td>
+                    <td>
+                        <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${escapeHtml(ip)}">DESBLOQUEAR</button>
+                    </td>
+                </tr>
+            `;
+            
+            if (existingRow) {
+                if (existingRow.outerHTML !== newRowHtml.trim()) {
+                    existingRow.outerHTML = newRowHtml;
+                }
+            } else {
+                tbody.insertAdjacentHTML('beforeend', newRowHtml);
+            }
+        });
+        
+        // Remover IPs não mais bloqueados
+        tbody.querySelectorAll('tr[data-ip]').forEach(row => {
+            if (!validIps.has(row.dataset.ip)) {
+                row.remove();
+            }
+        });
+        
     } catch (e) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="2">Erro ao carregar IPs bloqueados.</td></tr>';
+        if (isFirstLoad) {
+            tbody.innerHTML = '<tr class="empty-row"><td colspan="2">Erro ao carregar IPs bloqueados.</td></tr>';
+        }
     }
 }
 
@@ -1036,14 +1281,19 @@ async function toggleVod(id) {
 
 function onChannelModeChange() {
     const mode = document.getElementById('channel-mode-select').value;
+    const localSection = document.getElementById('local-folder-section');
+    const relaySection = document.getElementById('relay-section');
+    const transcodeContainer = document.getElementById('transcode-checkbox-container');
+    
     if (mode === 'relay') {
-        document.getElementById('local-folder-section').style.display = 'none';
-        document.getElementById('relay-section').style.display = 'block';
-        document.getElementById('transcode-checkbox-container').style.display = 'none';
+        if (localSection) localSection.classList.add('u-hidden');
+        if (relaySection) relaySection.classList.remove('u-hidden');
+        if (transcodeContainer) transcodeContainer.classList.add('u-hidden');
+        loadRelayM3UFiles();
     } else {
-        document.getElementById('local-folder-section').style.display = 'block';
-        document.getElementById('relay-section').style.display = 'none';
-        document.getElementById('transcode-checkbox-container').style.display = 'block';
+        if (localSection) localSection.classList.remove('u-hidden');
+        if (relaySection) relaySection.classList.add('u-hidden');
+        if (transcodeContainer) transcodeContainer.classList.remove('u-hidden');
     }
 }
 
