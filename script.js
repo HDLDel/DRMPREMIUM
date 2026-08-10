@@ -398,7 +398,7 @@ function sortTable(column) {
 }
 
 function updateSortIcons() {
-    const columns = ['id', 'name', 'status', 'uptime'];
+    const columns = ['id', 'name', 'status', 'type', 'uptime'];
     columns.forEach(col => {
         const icon = document.getElementById(`sort-icon-${col}`);
         if (!icon) return;
@@ -419,6 +419,29 @@ function getChannelStatus(channel) {
     return String(channel.status || channel.mode || '').toLowerCase();
 }
 
+function getChannelType(channel) {
+    const status = String(channel.status || '').toLowerCase();
+    if (status === 'vod') return 'vod';
+    if (String(channel.mode || '').toLowerCase() === 'relay') {
+        return channel.relaySubtype === 'loop' ? 'relay-loop' : 'relay-sync';
+    }
+    return 'live';
+}
+
+function getChannelTypeLabel(channel) {
+    const labels = {
+        live: 'LIVE',
+        vod: 'VOD',
+        'relay-sync': 'RELAY SYNC',
+        'relay-loop': 'RELAY LOOP'
+    };
+    return labels[getChannelType(channel)] || 'LIVE';
+}
+
+function isChannelOnline(channel) {
+    return String(channel.status || '').toLowerCase() !== 'offline';
+}
+
 // Function to load and render channels
 async function loadAndRenderChannels(filter = '') {
     try {
@@ -429,13 +452,16 @@ async function loadAndRenderChannels(filter = '') {
         const filterType = filterSelect ? filterSelect.value : 'all';
         const statusSelect = document.getElementById('status-filter');
         const statusFilter = statusSelect ? statusSelect.value : 'all';
+        const typeSelect = document.getElementById('type-filter');
+        const channelTypeFilter = typeSelect ? typeSelect.value : 'all';
 
         // Filtro, ordenação e paginação agora no servidor (payload enxuto por página)
         const params = new URLSearchParams({
             page: currentPage,
             pageSize,
             search: filter || '',
-            type: filterType,
+            contentType: filterType,
+            channelType: channelTypeFilter,
             status: statusFilter,
             sort: currentSortColumn,
             dir: currentSortDirection
@@ -463,14 +489,14 @@ async function loadAndRenderChannels(filter = '') {
         if (currentPage < 1) currentPage = 1;
         updatePaginationControls(totalCount, totalPages);
 
-        const hasActiveFilter = Boolean(filter) || filterType !== 'all' || statusFilter !== 'all';
+        const hasActiveFilter = Boolean(filter) || filterType !== 'all' || statusFilter !== 'all' || channelTypeFilter !== 'all';
 
         // Se vazio, mostrar mensagem
         if (channelList.length === 0) {
             const message = hasActiveFilter
                 ? 'Nenhum canal corresponde aos filtros atuais.'
                 : 'Nenhum canal configurado. Crie um novo!';
-            tbl.innerHTML = `<tr class="empty-row"><td colspan="5">${message}</td></tr>`;
+            tbl.innerHTML = `<tr class="empty-row"><td colspan="6">${message}</td></tr>`;
             return;
         }
 
@@ -544,6 +570,7 @@ function updatePaginationControls(totalCount, totalPages) {
 function createChannelRowContent(row, channel) {
     row.innerHTML = '';
     row.dataset.channelStatus = channel.status;
+    row.dataset.channelType = getChannelType(channel);
     
     const idCell = row.insertCell();
     idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
@@ -558,26 +585,15 @@ function createChannelRowContent(row, channel) {
     nameCell.innerHTML = nameHTML;
     
     const statusCell = row.insertCell();
-    let statusClass = 'status-offline';
-    let statusText = 'OFFLINE';
+    const online = isChannelOnline(channel);
+    statusCell.innerHTML = `<span class="status-badge ${online ? 'status-online' : 'status-offline'}">${online ? 'ONLINE' : 'OFFLINE'}</span>`;
+
+    const type = getChannelType(channel);
+    const typeCell = row.insertCell();
+    typeCell.innerHTML = `<span class="type-badge type-${type}">${getChannelTypeLabel(channel)}</span>`;
     
-    if (channel.status === 'online') {
-        statusClass = 'status-live';
-        statusText = '● LIVE';
-    } else if (channel.status === 'vod') {
-        statusClass = 'status-vod';
-        statusText = 'VOD';
-    } else if (channel.status === 'relay') {
-        statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
-        statusText = channel.relaySubtype === 'loop' 
-            ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
-            : 'RELAY SYNC';
-    }
-    statusCell.innerHTML = `<span class="status-badge ${statusClass}">${statusText}</span>`;
-    
-    const isActive = (channel.status === 'online' || channel.status === 'relay');
     const uptimeCell = row.insertCell();
-    uptimeCell.innerHTML = isActive
+    uptimeCell.innerHTML = online
         ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
         : `<span class="stat-muted">-</span>`;
     
@@ -613,33 +629,23 @@ function buildChannelActions(channel) {
 }
 
 function updateChannelRowContent(row, channel) {
-    // Atualizar apenas status e uptime (campos que mudam frequentemente)
+    // Atualizar status, tipo e uptime sem reconstruir a linha inteira.
     const statusCell = row.cells[2];
-    const uptimeCell = row.cells[3];
-    
-    let statusClass = 'status-offline';
-    let statusText = 'OFFLINE';
-    
-    if (channel.status === 'online') {
-        statusClass = 'status-live';
-        statusText = '● LIVE';
-    } else if (channel.status === 'vod') {
-        statusClass = 'status-vod';
-        statusText = 'VOD';
-    } else if (channel.status === 'relay') {
-        statusClass = channel.relaySubtype === 'loop' ? 'status-loop' : 'status-relay';
-        statusText = channel.relaySubtype === 'loop' 
-            ? "LOOP #" + ((channel.currentUrlIndex || 0) + 1) 
-            : 'RELAY SYNC';
-    }
-    
-    const newStatusHtml = `<span class="status-badge ${statusClass}">${statusText}</span>`;
+    const typeCell = row.cells[3];
+    const uptimeCell = row.cells[4];
+    const online = isChannelOnline(channel);
+    const newStatusHtml = `<span class="status-badge ${online ? 'status-online' : 'status-offline'}">${online ? 'ONLINE' : 'OFFLINE'}</span>`;
     if (statusCell.innerHTML !== newStatusHtml) {
         statusCell.innerHTML = newStatusHtml;
     }
-    
-    const isActive = (channel.status === 'online' || channel.status === 'relay');
-    const newUptimeHtml = isActive
+
+    const type = getChannelType(channel);
+    const newTypeHtml = `<span class="type-badge type-${type}">${getChannelTypeLabel(channel)}</span>`;
+    if (typeCell.innerHTML !== newTypeHtml) {
+        typeCell.innerHTML = newTypeHtml;
+    }
+
+    const newUptimeHtml = online
         ? `<span class="stat-num">${formatUptime(channel.uptime)}</span>`
         : `<span class="stat-muted">-</span>`;
     if (uptimeCell.innerHTML !== newUptimeHtml) {
@@ -648,9 +654,10 @@ function updateChannelRowContent(row, channel) {
 
     // Reconstruir a célula de ações (botão Iniciar/Parar, ASSISTIR, etc.)
     // quando o status mudar, para o ícone refletir o estado sem recarregar a página
-    if (row.dataset.channelStatus !== channel.status) {
+    if (row.dataset.channelStatus !== channel.status || row.dataset.channelType !== type) {
         row.dataset.channelStatus = channel.status;
-        const actionsCell = row.cells[4];
+        row.dataset.channelType = type;
+        const actionsCell = row.cells[5];
         if (actionsCell) actionsCell.innerHTML = buildChannelActions(channel);
     }
 }
@@ -682,7 +689,7 @@ function hideLogsModal() {
 
 async function deleteChannel(id, status) {
     // Bloqueio preventivo no frontend para evitar erros de permissão (EPERM)
-    if (status === 'online') {
+    if (status !== 'offline') {
         alert('Atenção: Você deve PARAR o canal antes de tentar excluí-lo.');
         return;
     }
@@ -1644,6 +1651,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const statusFilter = document.getElementById('status-filter');
     if (statusFilter) statusFilter.addEventListener('change', handleSearch);
+
+    const typeFilter = document.getElementById('type-filter');
+    if (typeFilter) typeFilter.addEventListener('change', handleSearch);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', handleSearch);

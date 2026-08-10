@@ -396,11 +396,41 @@ const activeStreams = new Map();
 // Timers de avanço automático para relay-loop
 const relayLoopTimers = new Map();
 
+// Timers de reinício automático após falha/watchdog.
+// Precisam ser canceláveis para que um stop manual vença um restart já agendado.
+const relayRestartTimers = new Map();
+
 function clearRelayLoopTimer(id) {
     if (relayLoopTimers.has(id)) {
         clearTimeout(relayLoopTimers.get(id));
         relayLoopTimers.delete(id);
     }
+}
+
+function clearRelayRestartTimer(id) {
+    const timer = relayRestartTimers.get(id);
+    if (timer) {
+        clearTimeout(timer);
+        relayRestartTimers.delete(id);
+    }
+}
+
+function scheduleRelayRestart(id, reason) {
+    clearRelayRestartTimer(id);
+
+    const timer = setTimeout(async () => {
+        relayRestartTimers.delete(id);
+        const channel = channels.find(c => c.id === id);
+
+        // Falha automática pode reiniciar; stop manual ou mudança de estado não.
+        if (!channel || channel.userStopped || channel.status !== 'offline') return;
+
+        console.log(`[RESTART] Canal ${id} reiniciando após ${reason}.`);
+        const result = await startChannel(id);
+        if (result && result.status === 'success') channel.restartFails = 0;
+    }, 2000);
+
+    relayRestartTimers.set(id, timer);
 }
 
 // Grava evento de log para o canal (funciona em Relay Loop, VOD e Live)
@@ -1168,6 +1198,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
             }
             const id = Number(data.id);
+            clearRelayRestartTimer(id);
             const channel = channels.find(c => c.id === id);
             if (channel) channel.userStopped = false;
             if (channel && channel.mode === 'relay') {
@@ -1201,12 +1232,26 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
         return;
     }
 
+    function getChannelType(channel) {
+        if (String(channel.status || '').toLowerCase() === 'vod') return 'vod';
+        if (String(channel.mode || '').toLowerCase() === 'relay') {
+            return channel.relaySubtype === 'loop' ? 'relay-loop' : 'relay-sync';
+        }
+        return 'live';
+    }
+
+    function getChannelDisplayStatus(channel) {
+        return String(channel.status || '').toLowerCase() === 'offline' ? 'offline' : 'online';
+    }
+
     // API: Listar todos os canais (com filtro, ordenação e paginação opcionais)
     if (url.pathname === '/api/channels') {
         let list = channels.map(c => {
             return {
                 ...c,
-                uptime: ((c.status === 'online' || c.status === 'relay') && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
+                channelType: getChannelType(c),
+                displayStatus: getChannelDisplayStatus(c),
+                uptime: (getChannelDisplayStatus(c) === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
             };
         });
 
@@ -1222,7 +1267,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
         }
 
         // Filtro por conteúdo (+18 / livre)
-        const filterType = q.get('type') || 'all';
+        const filterType = q.get('contentType') || q.get('type') || 'all';
         const isAdult = ch => ch.is18 === true || ch.is18 === 1 || ch.is18 === '1' || String(ch.is18 || '').toLowerCase() === 'true';
         if (filterType === '18') {
             list = list.filter(isAdult);
@@ -1230,20 +1275,28 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             list = list.filter(ch => !isAdult(ch));
         }
 
-        // Filtro por status
+        // Filtro por status: somente online/offline
         const statusFilter = q.get('status') || 'all';
-        if (statusFilter !== 'all') {
-            list = list.filter(ch => String(ch.status || ch.mode || '').toLowerCase() === statusFilter);
+        if (statusFilter === 'online') {
+            list = list.filter(ch => ch.displayStatus === 'online');
+        } else if (statusFilter === 'offline') {
+            list = list.filter(ch => ch.displayStatus === 'offline');
+        }
+
+        // Filtro por tipo de canal
+        const channelTypeFilter = q.get('channelType') || 'all';
+        if (channelTypeFilter !== 'all') {
+            list = list.filter(ch => ch.channelType === channelTypeFilter);
         }
 
         // Ordenação (espelha a ordenação do painel)
         const sortCol = q.get('sort') || 'id';
         const sortDir = q.get('dir') === 'desc' ? -1 : 1;
-        const validSortCols = ['id', 'name', 'status', 'uptime'];
+        const validSortCols = ['id', 'name', 'status', 'type', 'uptime'];
         const col = validSortCols.includes(sortCol) ? sortCol : 'id';
         list.sort((a, b) => {
-            let valA = a[col];
-            let valB = b[col];
+            let valA = col === 'status' ? a.displayStatus : col === 'type' ? a.channelType : a[col];
+            let valB = col === 'status' ? b.displayStatus : col === 'type' ? b.channelType : b[col];
             if (typeof valA === 'string') valA = valA.toLowerCase();
             if (typeof valB === 'string') valB = valB.toLowerCase();
             if (valA === undefined || valA === null) valA = '';
@@ -1598,6 +1651,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             }
 
             clearRelayLoopTimer(id);
+            clearRelayRestartTimer(id);
 
             // 2. Remove da lista e salva banco
             channels = channels.filter(c => c.id !== id);
@@ -1644,6 +1698,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 return res.end(JSON.stringify({ status: 'error', message: 'JSON inválido' }));
             }
             const id = Number(data.id);
+            clearRelayRestartTimer(id);
             
             const channel = channels.find(c => c.id === id);
             if (channel) {
@@ -1678,6 +1733,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             const batch = offlineChannels.slice(i, i + BATCH_SIZE);
             console.log(`[STARTALL] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
             const results = await Promise.all(batch.map(ch => {
+                clearRelayRestartTimer(ch.id);
                 ch.userStopped = false;
                 if (ch.mode === 'relay' && ch.relaySubtype === 'loop') {
                     return startRelayLoop(ch);
@@ -1717,6 +1773,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             }
 
             // Para o stream ativo se houver
+            clearRelayRestartTimer(id);
             if (activeStreams.has(id)) {
                 try { activeStreams.get(id).process.kill('SIGKILL'); } catch (e) {}
                 activeStreams.delete(id);
@@ -1778,6 +1835,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                     return res.end(JSON.stringify({ status: 'error', message: 'Canal sem URLs configuradas.' }));
                 }
                 clearRelayLoopTimer(id);
+                clearRelayRestartTimer(id);
                 channel.mode = 'relay';
                 channel.relaySubtype = 'loop';
                 channel.currentUrlIndex = 0;
@@ -1890,6 +1948,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 channel.userStopped = true;
                 if (channel.restartFails) channel.restartFails = 0;
                 clearRelayLoopTimer(channel.id);
+                clearRelayRestartTimer(channel.id);
                 const relayFlag = "/home/drmpremium/.relay_" + channel.id;
                 try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
                 if (activeStreams.has(channel.id)) {
@@ -2489,7 +2548,8 @@ setInterval(() => {
 
                 if (info.process) { try { info.process.kill('SIGKILL'); } catch (e) {} }
                 activeStreams.delete(id);
-                setTimeout(async () => await startChannel(id), 2000);
+                channel.status = 'offline';
+                scheduleRelayRestart(id, 'watchdog');
             }
         }
     });
@@ -2512,11 +2572,7 @@ setInterval(() => {
                     continue;
                 }
                 console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) offline. Reiniciando relay-sync...`);
-                channel.status = 'relay';
-                setTimeout(async () => {
-                    const result = await startChannel(channel.id);
-                    if (result && result.status === 'success') channel.restartFails = 0;
-                }, 2000);
+                scheduleRelayRestart(channel.id, 'guardian');
             }
         }
     }

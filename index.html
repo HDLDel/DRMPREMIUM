@@ -119,12 +119,17 @@
     <option value="18">APENAS +18</option>
     <option value="family">LIVRE (SEM +18)</option>
 </select>
-<select id="status-filter" style="margin-left:10px">
+<select id="status-filter">
     <option value="all">QUALQUER STATUS</option>
     <option value="online">ONLINE</option>
-    <option value="relay">RELAY</option>
-    <option value="vod">VOD</option>
     <option value="offline">OFFLINE</option>
+</select>
+<select id="type-filter">
+    <option value="all">QUALQUER TIPO</option>
+    <option value="live">LIVE</option>
+    <option value="vod">VOD</option>
+    <option value="relay-sync">RELAY SYNC</option>
+    <option value="relay-loop">RELAY LOOP</option>
 </select>
                     </div>
                     <div class="btn-group">
@@ -157,12 +162,13 @@
                                 <th class="th-sort" data-sort="id">ID <span id="sort-icon-id"></span></th>
                                 <th class="th-sort" data-sort="name">Nome <span id="sort-icon-name"></span></th>
                                 <th class="th-sort" data-sort="status">Status <span id="sort-icon-status"></span></th>
+                                <th class="th-sort" data-sort="type">Tipo <span id="sort-icon-type"></span></th>
                                 <th class="th-sort" data-sort="uptime">Uptime <span id="sort-icon-uptime"></span></th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody id="channels-table">
-                            <tr class="empty-row"><td colspan="5">Carregando canais...</td></tr>
+                            <tr class="empty-row"><td colspan="6">Carregando canais...</td></tr>
                         </tbody>
                     </table>
                 </div>

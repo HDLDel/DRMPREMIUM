@@ -874,6 +874,11 @@ table td {
     flex: 0 0 auto;
 }
 
+.status-online {
+    color: var(--green);
+    background: var(--green-soft);
+}
+
 .status-live {
     color: var(--green);
     background: var(--green-soft);
@@ -897,6 +902,48 @@ table td {
 .status-offline {
     color: var(--text-mute);
     background: var(--surface-3);
+}
+
+.type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 4px 11px;
+    white-space: nowrap;
+}
+
+.type-badge::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex: 0 0 auto;
+}
+
+.type-live {
+    color: var(--green);
+    background: var(--green-soft);
+}
+
+.type-vod {
+    color: var(--cyan);
+    background: var(--cyan-soft);
+}
+
+.type-relay-sync {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.type-relay-loop {
+    color: var(--amber);
+    background: var(--amber-soft);
 }
 
 /* ============================================================
