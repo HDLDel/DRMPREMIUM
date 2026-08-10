@@ -437,6 +437,8 @@ async function loadAndRenderChannels(filter = '') {
                 valA = valA.toLowerCase();
                 valB = valB.toLowerCase();
             }
+            if (valA === undefined || valA === null) valA = '';
+            if (valB === undefined || valB === null) valB = '';
 
             if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
             if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
@@ -470,6 +472,7 @@ async function loadAndRenderChannels(filter = '') {
 
         // Processar canais: atualizar ou criar
         const validIds = new Set();
+        const rowsById = new Map();
         channelList.forEach(channel => {
             const channelIdStr = channel.id.toString();
             validIds.add(channelIdStr);
@@ -477,10 +480,12 @@ async function loadAndRenderChannels(filter = '') {
             const existingRow = existingRows.get(channelIdStr);
             if (existingRow) {
                 updateChannelRowContent(existingRow, channel);
+                rowsById.set(channelIdStr, existingRow);
             } else {
                 const newRow = tbl.insertRow();
                 newRow.dataset.channelId = channelIdStr;
                 createChannelRowContent(newRow, channel);
+                rowsById.set(channelIdStr, newRow);
             }
         });
 
@@ -490,6 +495,14 @@ async function loadAndRenderChannels(filter = '') {
                 row.remove();
             }
         });
+
+        // Reordenar linhas para refletir a ordenação (appendChild move a linha existente)
+        const reorderFragment = document.createDocumentFragment();
+        channelList.forEach(channel => {
+            const row = rowsById.get(channel.id.toString());
+            if (row) reorderFragment.appendChild(row);
+        });
+        tbl.appendChild(reorderFragment);
 
     } catch (err) {
         console.error('Erro ao carregar canais:', err);
@@ -1441,7 +1454,12 @@ function openPlayerModal(channelId, channelName) {
         hlsPlayerInstance = new Hls({
             manifestLoadingTimeOut: 15000,
             manifestLoadingMaxRetry: 5,
-            levelLoadingTimeOut: 15000
+            levelLoadingTimeOut: 15000,
+            liveSyncDurationCount: 1,
+            liveMaxLatencyDurationCount: 3,
+            liveDurationInfinity: true,
+            maxBufferLength: 30,
+            startPosition: -1
         });
         hlsPlayerInstance.loadSource(currentPlayingStreamUrl);
         hlsPlayerInstance.attachMedia(video);
