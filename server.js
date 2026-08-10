@@ -457,6 +457,13 @@ async function startRelayLoop(channel) {
     if (channel.currentUrlIndex === undefined || channel.currentUrlIndex >= probed.length) {
         channel.currentUrlIndex = 0;
     }
+    // Se o usuário parou o canal durante o probe, aborta o início (não recria flag/timer)
+    if (channel.userStopped) {
+        console.log("[RELAY LOOP] Canal " + channel.id + " parado pelo usuário durante o probe. Abortando.");
+        channel.status = 'offline';
+        saveChannels();
+        return { status: 'error', message: 'Canal parado durante o start' };
+    }
     setRelayFlag(channel.id);
     channel.status = 'relay';
     channel.userStopped = false;
@@ -885,6 +892,16 @@ async function startChannel(id) {
         '-hls_segment_filename', path.join(outputDir, 'segment_%03d.ts'),
         path.join(outputDir, 'index.m3u8')
     );
+
+    // Se o usuário parou o canal durante o probe, aborta o início (evita revival não solicitado)
+    if (channel.userStopped) {
+        console.log("[START ABORTADO] Canal " + id + " parado pelo usuário durante o start. Abortando.");
+        activeStreams.delete(id);
+        channel.status = 'offline';
+        delete channel.startedAt;
+        saveChannels();
+        return { status: 'error', message: 'Canal parado durante o start' };
+    }
 
     const ffmpeg = spawnFFmpeg(args);
 
@@ -1643,7 +1660,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             console.log("[RELAY] Canal " + id + " desativado via stop");
 
             if (activeStreams.has(id)) {
-                activeStreams.get(id).process.kill('SIGKILL');
+                try { const proc = activeStreams.get(id).process; if (proc) proc.kill('SIGKILL'); } catch (e) {}
                 activeStreams.delete(id);
             }
             saveChannels().catch(e => console.error('[ERRO] Falha ao salvar channels no stop:', e));
@@ -2470,7 +2487,7 @@ setInterval(() => {
                 const fileIndex = estimateFileIndex(id, totalFiles);
                 channelPlaylistState.set(id, { fileIndex, updatedAt: Date.now() });
 
-                info.process.kill('SIGKILL');
+                if (info.process) { try { info.process.kill('SIGKILL'); } catch (e) {} }
                 activeStreams.delete(id);
                 setTimeout(async () => await startChannel(id), 2000);
             }
