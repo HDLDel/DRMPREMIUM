@@ -459,6 +459,7 @@ async function startRelayLoop(channel) {
     }
     setRelayFlag(channel.id);
     channel.status = 'relay';
+    channel.userStopped = false;
     channel.startedAt = Date.now();
     await saveChannels();
     scheduleRelayLoop(channel);
@@ -944,6 +945,7 @@ async function startChannel(id) {
         process: ffmpeg,
         startedAt: channel.startedAt
     });    channel.status = channel.mode === 'relay' ? 'relay' : 'online';
+    channel.userStopped = false;
     if (channel.restartFails) channel.restartFails = 0;
     saveChannels();
 
@@ -1150,6 +1152,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             }
             const id = Number(data.id);
             const channel = channels.find(c => c.id === id);
+            if (channel) channel.userStopped = false;
             if (channel && channel.mode === 'relay') {
                 if (channel.relaySubtype === 'sync') {
                     if (!channel.relayUrls || channel.relayUrls.length === 0) {
@@ -1629,6 +1632,8 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             if (channel) {
                 channel.status = 'offline';
                 delete channel.startedAt;
+                channel.userStopped = true;
+                if (channel.restartFails) channel.restartFails = 0;
             }
 
             clearRelayLoopTimer(id);
@@ -1656,6 +1661,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             const batch = offlineChannels.slice(i, i + BATCH_SIZE);
             console.log(`[STARTALL] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
             const results = await Promise.all(batch.map(ch => {
+                ch.userStopped = false;
                 if (ch.mode === 'relay' && ch.relaySubtype === 'loop') {
                     return startRelayLoop(ch);
                 }
@@ -1706,7 +1712,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
 
             if (newMode === 'offline') {
                 channel.status = 'offline';
-                channel.startedAt = undefined;
+                channel.userStopped = true;
                 if (channel.restartFails) channel.restartFails = 0;
                 await saveChannels();
                 res.writeHead(200);
@@ -1741,6 +1747,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 }
                 setVodFlag(id);
                 channel.status = 'vod';
+                channel.userStopped = false;
                 channel.startedAt = undefined;
                 await saveChannels();
                 console.log("[SWITCH] Canal " + id + " → VOD");
@@ -1758,6 +1765,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 channel.relaySubtype = 'loop';
                 channel.currentUrlIndex = 0;
                 channel.status = 'offline';
+                channel.userStopped = false;
                 channel.startedAt = undefined;
                 await saveChannels();
                 const result = await startRelayLoop(channel);
@@ -1788,6 +1796,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                         channel.currentUrlIndex = 0;
                     }
                 }
+                channel.userStopped = false;
                 await saveChannels();
                 const result = await startChannel(id);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1861,6 +1870,8 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
         for (const channel of channels) {
             if (channel.status === 'online' || channel.status === 'relay' || activeStreams.has(channel.id)) {
                 channel.status = 'offline';
+                channel.userStopped = true;
+                if (channel.restartFails) channel.restartFails = 0;
                 clearRelayLoopTimer(channel.id);
                 const relayFlag = "/home/drmpremium/.relay_" + channel.id;
                 try { if (fs.existsSync(relayFlag)) fs.unlinkSync(relayFlag); } catch (e) {}
@@ -2470,6 +2481,8 @@ setInterval(() => {
     // Limite de tentativas consecutivas: se o canal falhar ao subir muitas vezes, pausa o guardian
     for (const channel of channels) {
         if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
+            // Canal parado manualmente pelo usuário não pode ser revivido
+            if (channel.userStopped) continue;
             const isAlive = activeStreams.has(channel.id);
             if (!isAlive && channel.status !== 'offline') {
                 console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) sem FFmpeg ativo (status=${channel.status}). Corrigindo...`);
@@ -2579,10 +2592,11 @@ setTimeout(parseNginxAccessLog, 5000);
      cleanTmpfsSegments();
      
      // Reseta status de canais em lotes e inicia de forma correta baseada no seu modo original
+     // Canais parados manualmente (userStopped) permanecem parados após o restart
      let resetCount = 0;
      let resetRelayCount = 0;
      for (const ch of channels) {
-         if (ch.status !== 'vod') {
+         if (ch.status !== 'vod' && !ch.userStopped) {
              if (ch.mode === 'relay') {
                  ch.status = 'relay';
                  resetRelayCount++;
@@ -2594,8 +2608,8 @@ setTimeout(parseNginxAccessLog, 5000);
      }
      console.log(`[STARTUP] ${resetCount} canais resetados para online, ${resetRelayCount} canais resetados para relay`);
      
-     // Auto-start de canais Live e Relay Sync
-     const channelsToStart = channels.filter(c => c.status === 'online' || (c.status === 'relay' && c.relaySubtype === 'sync'));
+     // Auto-start de canais Live e Relay Sync (ignora canais parados manualmente)
+     const channelsToStart = channels.filter(c => !c.userStopped && (c.status === 'online' || (c.status === 'relay' && c.relaySubtype === 'sync')));
      const BATCH_SIZE = 5;
      for (let i = 0; i < channelsToStart.length; i += BATCH_SIZE) {
          const batch = channelsToStart.slice(i, i + BATCH_SIZE);
@@ -2606,9 +2620,9 @@ setTimeout(parseNginxAccessLog, 5000);
          }));
      }
 
-    // Auto-start de canais Relay Loop
+    // Auto-start de canais Relay Loop (ignora canais parados manualmente)
     for (const channel of channels) {
-        if (channel.mode === 'relay' && channel.relaySubtype === 'loop') {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'loop' && !channel.userStopped) {
             channel.status = 'relay';
             if (!hasRelayFlag(channel.id)) {
                 setRelayFlag(channel.id);
@@ -2618,9 +2632,9 @@ setTimeout(parseNginxAccessLog, 5000);
             startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
         }
     }
-    // Cria flag para relay-sync que ainda nao tem flag
+    // Cria flag para relay-sync que ainda nao tem flag (ignora canais parados manualmente)
     for (const channel of channels) {
-        if (channel.mode === 'relay' && channel.relaySubtype === 'sync' && !hasRelayFlag(channel.id)) {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'sync' && !channel.userStopped && !hasRelayFlag(channel.id)) {
             setRelayFlag(channel.id);
             console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ") (sync)");
         }

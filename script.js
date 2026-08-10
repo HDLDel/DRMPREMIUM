@@ -4,16 +4,28 @@
 
 let allChannels = []; // Armazenar todos os canais para busca
 let allChannelsCache = null;
+let allChannelsCacheTime = 0;
+const ALL_CHANNELS_TTL = 3000; // 3s: dados frescos sem refetch em cada clique
 
 // Busca a lista completa de canais sob demanda (ações pontuais: editar, copiar link, alternar modo)
+// Cache curto + invalidação explícita nas mutações garante status sempre atualizado
 async function getAllChannels() {
-    if (allChannelsCache) return allChannelsCache;
+    if (allChannelsCache && (Date.now() - allChannelsCacheTime) < ALL_CHANNELS_TTL) {
+        return allChannelsCache;
+    }
     const res = await apiFetch('/api/channels');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const list = await res.json();
     allChannels = Array.isArray(list) ? list : [];
     allChannelsCache = allChannels;
+    allChannelsCacheTime = Date.now();
     return allChannels;
+}
+
+// Invalida o cache após qualquer mutação (parar, iniciar, excluir, alternar modo, etc.)
+function invalidateAllChannelsCache() {
+    allChannelsCache = null;
+    allChannelsCacheTime = 0;
 }
 
 // ─── Ícones SVG (sistema de ícones consistente do painel) ───
@@ -335,6 +347,7 @@ async function start(id) {
         // } else {
         //     alert(`Erro: ${result.message}`);
         // }
+        invalidateAllChannelsCache();
         updateStats();
         loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
@@ -349,6 +362,7 @@ async function stop(id) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
+        invalidateAllChannelsCache();
         updateStats(); // This will also call loadAndRenderChannels
         loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
@@ -687,6 +701,7 @@ async function deleteChannel(id, status) {
             return;
         }
 
+        invalidateAllChannelsCache();
         updateStats(); // Isso forçará a atualização da lista de canais
         loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
     } catch (err) {
@@ -890,6 +905,7 @@ async function createOrEditChannel() {
         const result = await res.json().catch(() => ({}));
         if (result.status === 'success') {
             alert(editingChannelId !== null ? "Canal atualizado com sucesso!" : "Canal criado com sucesso!");
+            invalidateAllChannelsCache();
             hideCreateChannelModal();
             const input = document.getElementById('search-input');
             loadAndRenderChannels(input ? input.value : '');
@@ -1233,6 +1249,7 @@ async function toggle18(id) {
             body: JSON.stringify({ id })
         });
         if (res.ok) {
+            invalidateAllChannelsCache();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         }
     } catch (err) {
@@ -1261,6 +1278,7 @@ async function startAll() {
             method: 'POST'
         });
         if (res.ok) {
+            invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
@@ -1278,6 +1296,7 @@ async function stopAll() {
             method: 'POST'
         });
         if (res.ok) {
+            invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
@@ -1312,6 +1331,7 @@ async function toggleVod(id) {
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.status === 'success') {
             alert(`Canal ${id} alternado para modo ${data.mode.toUpperCase()} com sucesso!`);
+            invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
@@ -1437,6 +1457,7 @@ async function submitSwitchMode() {
         const result = await res.json().catch(() => ({}));
         if (result.status === 'success') {
             hideSwitchModeModal();
+            invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
         } else {
