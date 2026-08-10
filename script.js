@@ -3,6 +3,18 @@
  */
 
 let allChannels = []; // Armazenar todos os canais para busca
+let allChannelsCache = null;
+
+// Busca a lista completa de canais sob demanda (ações pontuais: editar, copiar link, alternar modo)
+async function getAllChannels() {
+    if (allChannelsCache) return allChannelsCache;
+    const res = await apiFetch('/api/channels');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    allChannels = Array.isArray(list) ? list : [];
+    allChannelsCache = allChannels;
+    return allChannels;
+}
 
 // ─── Ícones SVG (sistema de ícones consistente do painel) ───
 const ICON_PATHS = {
@@ -356,6 +368,10 @@ function formatUptime(seconds) {
 let currentSortColumn = 'id';
 let currentSortDirection = 'asc';
 
+// Variáveis de estado para paginação
+let currentPage = 1;
+let pageSize = 50;
+
 function sortTable(column) {
     if (currentSortColumn === column) {
         currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
@@ -395,64 +411,48 @@ async function loadAndRenderChannels(filter = '') {
         const tbl = document.getElementById('channels-table');
         if (!tbl) return;
 
-        const res = await apiFetch('/api/channels');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const channels = await res.json();
-        if (!Array.isArray(channels)) throw new Error('Resposta inválida');
-        let channelList = [...channels];
-
-        allChannels = channels;
-
-        // Aplicar filtro de busca
-        const searchTerm = String(filter).trim().toLowerCase();
-        if (searchTerm) {
-            channelList = channels.filter(channel =>
-                String(channel.name || '').toLowerCase().includes(searchTerm) ||
-                String(channel.id ?? '').includes(searchTerm)
-            );
-        }
-
-        // Aplicar filtro por tipo de conteúdo (+18 / Livre)
         const filterSelect = document.getElementById('filter-select');
         const filterType = filterSelect ? filterSelect.value : 'all';
-        if (filterType === '18') {
-            channelList = channelList.filter(isAdultChannel);
-        } else if (filterType === 'family') {
-            channelList = channelList.filter(channel => !isAdultChannel(channel));
-        }
-
-        // Aplicar filtro por status (online/offline/relay/vod)
         const statusSelect = document.getElementById('status-filter');
         const statusFilter = statusSelect ? statusSelect.value : 'all';
-        if (statusFilter !== 'all') {
-            channelList = channelList.filter(channel => getChannelStatus(channel) === statusFilter);
-        }
 
-        // Lógica de ordenação
-        channelList.sort((a, b) => {
-            let valA = a[currentSortColumn];
-            let valB = b[currentSortColumn];
-
-            if (typeof valA === 'string') {
-                valA = valA.toLowerCase();
-                valB = valB.toLowerCase();
-            }
-            if (valA === undefined || valA === null) valA = '';
-            if (valB === undefined || valB === null) valB = '';
-
-            if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
-            if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
-            return 0;
+        // Filtro, ordenação e paginação agora no servidor (payload enxuto por página)
+        const params = new URLSearchParams({
+            page: currentPage,
+            pageSize,
+            search: filter || '',
+            type: filterType,
+            status: statusFilter,
+            sort: currentSortColumn,
+            dir: currentSortDirection
         });
+
+        const res = await apiFetch('/api/channels?' + params.toString());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data || !Array.isArray(data.items)) throw new Error('Resposta inválida');
+
+        const channelList = data.items;
+        const totalCount = data.total;
 
         updateSortIcons();
 
         const hint = document.getElementById('channel-count-hint');
-        if (hint) hint.innerText = channelList.length + ' CANAIS';
+        if (hint) hint.innerText = totalCount + ' CANAIS';
+
+        // Garantir página dentro dos limites (refaz o fetch uma vez se o servidor clampou)
+        const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+        if (totalCount > 0 && currentPage > totalPages) {
+            currentPage = totalPages;
+            return loadAndRenderChannels(filter);
+        }
+        if (currentPage < 1) currentPage = 1;
+        updatePaginationControls(totalCount, totalPages);
+
+        const hasActiveFilter = Boolean(filter) || filterType !== 'all' || statusFilter !== 'all';
 
         // Se vazio, mostrar mensagem
         if (channelList.length === 0) {
-            const hasActiveFilter = Boolean(searchTerm) || filterType !== 'all' || statusFilter !== 'all';
             const message = hasActiveFilter
                 ? 'Nenhum canal corresponde aos filtros atuais.'
                 : 'Nenhum canal configurado. Crie um novo!';
@@ -509,8 +509,27 @@ async function loadAndRenderChannels(filter = '') {
     }
 }
 
+function updatePaginationControls(totalCount, totalPages) {
+    const info = document.getElementById('pagination-info');
+    const prevBtn = document.getElementById('pagination-prev');
+    const nextBtn = document.getElementById('pagination-next');
+
+    if (info) {
+        if (totalCount === 0) {
+            info.innerText = 'Nenhum canal';
+        } else {
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, totalCount);
+            info.innerText = `Página ${currentPage} de ${totalPages} · ${start}–${end} de ${totalCount}`;
+        }
+    }
+    if (prevBtn) prevBtn.disabled = currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+}
+
 function createChannelRowContent(row, channel) {
     row.innerHTML = '';
+    row.dataset.channelStatus = channel.status;
     
     const idCell = row.insertCell();
     idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
@@ -549,7 +568,10 @@ function createChannelRowContent(row, channel) {
         : `<span class="stat-muted">-</span>`;
     
     const actionsCell = row.insertCell();
-    
+    actionsCell.innerHTML = buildChannelActions(channel);
+}
+
+function buildChannelActions(channel) {
     let actionBtns = '';
     
     if (channel.status === 'offline') {
@@ -573,7 +595,7 @@ function createChannelRowContent(row, channel) {
         `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
         `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
     
-    actionsCell.innerHTML = `<div class="action-bar">${actionBtns}</div>`;
+    return `<div class="action-bar">${actionBtns}</div>`;
 }
 
 function updateChannelRowContent(row, channel) {
@@ -608,6 +630,14 @@ function updateChannelRowContent(row, channel) {
         : `<span class="stat-muted">-</span>`;
     if (uptimeCell.innerHTML !== newUptimeHtml) {
         uptimeCell.innerHTML = newUptimeHtml;
+    }
+
+    // Reconstruir a célula de ações (botão Iniciar/Parar, ASSISTIR, etc.)
+    // quando o status mudar, para o ícone refletir o estado sem recarregar a página
+    if (row.dataset.channelStatus !== channel.status) {
+        row.dataset.channelStatus = channel.status;
+        const actionsCell = row.cells[4];
+        if (actionsCell) actionsCell.innerHTML = buildChannelActions(channel);
     }
 }
 
@@ -679,8 +709,9 @@ function showCreateChannelModal() {
     loadRelayM3UFiles();
 }
 
-function showEditChannelModal(id) {
-    const channel = allChannels.find(c => c.id === id);
+async function showEditChannelModal(id) {
+    const all = await getAllChannels().catch(() => []);
+    const channel = all.find(c => c.id === id);
     if (!channel) return;
     
     if (channel.status === 'online' || channel.status === 'relay') {
@@ -873,6 +904,7 @@ async function createOrEditChannel() {
 
 // Função para busca
 function handleSearch() {
+    currentPage = 1;
     const input = document.getElementById('search-input');
     loadAndRenderChannels(input ? input.value : '');
 }
@@ -1257,7 +1289,8 @@ async function stopAll() {
 }
 
 async function toggleVod(id) {
-    const channel = allChannels.find(c => c.id === id);
+    const all = await getAllChannels().catch(() => []);
+    const channel = all.find(c => c.id === id);
     if (!channel) return;
     
     let confirmMsg = '';
@@ -1367,8 +1400,9 @@ async function advanceRelay(id) {
 
 let switchModeChannelId = null;
 
-function openSwitchModeModal(id) {
-    const channel = allChannels.find(c => c.id === id);
+async function openSwitchModeModal(id) {
+    const all = await getAllChannels().catch(() => []);
+    const channel = all.find(c => c.id === id);
     if (!channel) return;
     switchModeChannelId = id;
     document.getElementById('switch-mode-channel-name').innerText = "Canal: " + channel.name;
@@ -1432,6 +1466,26 @@ function copyChannelM3U(channelId) {
     }
 }
 
+let hlsJsLoadPromise = null;
+
+// Carrega o hls.js do CDN apenas quando o player for aberto (evita bloquear o painel)
+function loadHlsJs() {
+    if (window.Hls) return Promise.resolve();
+    if (hlsJsLoadPromise) return hlsJsLoadPromise;
+    hlsJsLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js';
+        s.async = true;
+        s.onload = () => resolve();
+        s.onerror = () => {
+            hlsJsLoadPromise = null;
+            reject(new Error('Falha ao carregar hls.js'));
+        };
+        document.head.appendChild(s);
+    });
+    return hlsJsLoadPromise;
+}
+
 function openPlayerModal(channelId, channelName) {
     const modal = document.getElementById('player-modal');
     const video = document.getElementById('hls-video-player');
@@ -1450,45 +1504,56 @@ function openPlayerModal(channelId, channelName) {
         hlsPlayerInstance = null;
     }
 
-    if (window.Hls && Hls.isSupported()) {
-        hlsPlayerInstance = new Hls({
-            manifestLoadingTimeOut: 15000,
-            manifestLoadingMaxRetry: 5,
-            levelLoadingTimeOut: 15000,
-            liveSyncDurationCount: 1,
-            liveMaxLatencyDurationCount: 3,
-            liveDurationInfinity: true,
-            maxBufferLength: 30,
-            startPosition: -1
-        });
-        hlsPlayerInstance.loadSource(currentPlayingStreamUrl);
-        hlsPlayerInstance.attachMedia(video);
-        hlsPlayerInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(e => console.log('Autoplay prevenido pelo navegador:', e));
-        });
-        hlsPlayerInstance.on(Hls.Events.ERROR, (event, data) => {
-            if (data.fatal) {
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        console.warn('[PLAYER] Erro de rede no stream HLS, reconectando...');
-                        hlsPlayerInstance.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        console.warn('[PLAYER] Erro de mídia no stream HLS, recuperando...');
-                        hlsPlayerInstance.recoverMediaError();
-                        break;
-                    default:
-                        console.error('[PLAYER] Erro fatal no stream HLS:', data);
-                        break;
+    const startPlayback = () => {
+        if (window.Hls && Hls.isSupported()) {
+            hlsPlayerInstance = new Hls({
+                manifestLoadingTimeOut: 15000,
+                manifestLoadingMaxRetry: 5,
+                levelLoadingTimeOut: 15000,
+                liveSyncDurationCount: 1,
+                liveMaxLatencyDurationCount: 3,
+                liveDurationInfinity: true,
+                maxBufferLength: 30,
+                startPosition: -1
+            });
+            hlsPlayerInstance.loadSource(currentPlayingStreamUrl);
+            hlsPlayerInstance.attachMedia(video);
+            hlsPlayerInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                video.play().catch(e => console.log('Autoplay prevenido pelo navegador:', e));
+            });
+            hlsPlayerInstance.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.warn('[PLAYER] Erro de rede no stream HLS, reconectando...');
+                            hlsPlayerInstance.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.warn('[PLAYER] Erro de mídia no stream HLS, recuperando...');
+                            hlsPlayerInstance.recoverMediaError();
+                            break;
+                        default:
+                            console.error('[PLAYER] Erro fatal no stream HLS:', data);
+                            break;
+                    }
                 }
-            }
-        });
-    } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = currentPlayingStreamUrl;
-        video.play().catch(e => console.log('Autoplay prevenido:', e));
-    } else {
-        alert('Seu navegador não possui suporte para reprodução de vídeo HLS.');
-    }
+            });
+        } else if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = currentPlayingStreamUrl;
+            video.play().catch(e => console.log('Autoplay prevenido:', e));
+        } else {
+            alert('Seu navegador não possui suporte para reprodução de vídeo HLS.');
+        }
+    };
+
+    loadHlsJs().then(startPlayback).catch(() => {
+        if (video && video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = currentPlayingStreamUrl;
+            video.play().catch(e => console.log('Autoplay prevenido:', e));
+        } else {
+            alert('Falha ao carregar o player HLS.');
+        }
+    });
 }
 
 function closePlayerModal() {
@@ -1561,6 +1626,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', handleSearch);
+
+    // Pagination controls
+    const pageSizeSelect = document.getElementById('page-size-select');
+    if (pageSizeSelect) pageSizeSelect.addEventListener('change', () => {
+        pageSize = parseInt(pageSizeSelect.value, 10) || 50;
+        currentPage = 1;
+        const searchEl = document.getElementById('search-input');
+        loadAndRenderChannels(searchEl ? searchEl.value : '');
+    });
+
+    const paginationPrev = document.getElementById('pagination-prev');
+    if (paginationPrev) paginationPrev.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            const searchEl = document.getElementById('search-input');
+            loadAndRenderChannels(searchEl ? searchEl.value : '');
+        }
+    });
+
+    const paginationNext = document.getElementById('pagination-next');
+    if (paginationNext) paginationNext.addEventListener('click', () => {
+        currentPage++;
+        const searchEl = document.getElementById('search-input');
+        loadAndRenderChannels(searchEl ? searchEl.value : '');
+    });
 
     // Action buttons
     const btnStartAll = document.getElementById('btn-start-all');

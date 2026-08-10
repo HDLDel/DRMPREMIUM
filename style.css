@@ -668,6 +668,59 @@ table td {
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* ============================================================
+   PAGINAÇÃO DE CANAIS
+   ============================================================ */
+
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-soft);
+}
+
+.pagination-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pagination-info label {
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+.pagination-info select {
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+}
+
+.pagination-text {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
+.pagination-nav {
+    display: flex;
+    gap: 8px;
+}
+
+.pagination-nav button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .search-group select,
 .field select {
     font-family: var(--font);

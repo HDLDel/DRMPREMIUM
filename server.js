@@ -1181,16 +1181,73 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
         return;
     }
 
-    // API: Listar todos os canais
+    // API: Listar todos os canais (com filtro, ordenação e paginação opcionais)
     if (url.pathname === '/api/channels') {
-        const channelsWithUptime = channels.map(c => {
+        let list = channels.map(c => {
             return {
                 ...c,
                 uptime: ((c.status === 'online' || c.status === 'relay') && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
             };
         });
+
+        const q = url.searchParams;
+
+        // Filtro por busca (nome ou ID)
+        const searchTerm = String(q.get('search') || '').trim().toLowerCase();
+        if (searchTerm) {
+            list = list.filter(ch =>
+                String(ch.name || '').toLowerCase().includes(searchTerm) ||
+                String(ch.id ?? '').includes(searchTerm)
+            );
+        }
+
+        // Filtro por conteúdo (+18 / livre)
+        const filterType = q.get('type') || 'all';
+        const isAdult = ch => ch.is18 === true || ch.is18 === 1 || ch.is18 === '1' || String(ch.is18 || '').toLowerCase() === 'true';
+        if (filterType === '18') {
+            list = list.filter(isAdult);
+        } else if (filterType === 'family') {
+            list = list.filter(ch => !isAdult(ch));
+        }
+
+        // Filtro por status
+        const statusFilter = q.get('status') || 'all';
+        if (statusFilter !== 'all') {
+            list = list.filter(ch => String(ch.status || ch.mode || '').toLowerCase() === statusFilter);
+        }
+
+        // Ordenação (espelha a ordenação do painel)
+        const sortCol = q.get('sort') || 'id';
+        const sortDir = q.get('dir') === 'desc' ? -1 : 1;
+        const validSortCols = ['id', 'name', 'status', 'uptime'];
+        const col = validSortCols.includes(sortCol) ? sortCol : 'id';
+        list.sort((a, b) => {
+            let valA = a[col];
+            let valB = b[col];
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+            if (valA === undefined || valA === null) valA = '';
+            if (valB === undefined || valB === null) valB = '';
+            if (valA < valB) return -1 * sortDir;
+            if (valA > valB) return 1 * sortDir;
+            return 0;
+        });
+
+        const total = list.length;
+
+        // Paginação opcional: se pageSize estiver presente, retorna {total, items} da página
+        const pageSizeRaw = parseInt(q.get('pageSize'), 10);
+        if (!isNaN(pageSizeRaw) && pageSizeRaw > 0) {
+            const pageSize = pageSizeRaw;
+            const page = (isNaN(parseInt(q.get('page'), 10)) || parseInt(q.get('page'), 10) < 1) ? 1 : parseInt(q.get('page'), 10);
+            const start = (page - 1) * pageSize;
+            const items = list.slice(start, start + pageSize);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ total, page, pageSize, items }));
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(channelsWithUptime));
+        return res.end(JSON.stringify(list));
     }
 
     // API: Listar pastas e subpastas para o Select do Modal
@@ -2347,9 +2404,15 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             };
             
             const headers = { 'Content-Type': types[ext] || 'text/plain' };
-            // Impede que o navegador faça cache do painel (Dashboard)
+            // Painel (Dashboard): revalidação com ETag (304) em vez de no-store
             if (ext === '.js' || ext === '.css' || ext === '.html') {
-                headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+                const etag = '"' + crypto.createHash('md5').update(content).digest('hex') + '"';
+                headers['ETag'] = etag;
+                headers['Cache-Control'] = 'no-cache, must-revalidate';
+                if (req.headers['if-none-match'] === etag) {
+                    res.writeHead(304, headers);
+                    return res.end();
+                }
             }
 
             res.writeHead(200, headers);

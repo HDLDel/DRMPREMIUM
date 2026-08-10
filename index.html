@@ -166,6 +166,27 @@
                         </tbody>
                     </table>
                 </div>
+                <div class="pagination-bar">
+                    <div class="pagination-info">
+                        <label for="page-size-select">Itens por página:</label>
+                        <select id="page-size-select">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="30">30</option>
+                            <option value="40">40</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="1000">1000</option>
+                        </select>
+                        <span id="pagination-info" class="pagination-text">Página 1 de 1</span>
+                    </div>
+                    <div class="pagination-nav">
+                        <button class="btn-neutral btn-small" id="pagination-prev" disabled>‹ Anterior</button>
+                        <button class="btn-neutral btn-small" id="pagination-next">Próxima ›</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -426,7 +447,6 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
     </button>
 
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="script.js?v=4.0.0"></script>
+    <script src="script.js?v=4.1.0"></script>
 </body>
 </html>
