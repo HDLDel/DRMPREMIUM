@@ -391,7 +391,8 @@ table td {
     grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
     gap: 14px;
     padding: 22px 28px 4px;
-    max-width: 1400px;
+    width: 100%;
+    max-width: 1800px;
     margin: 0 auto;
 }
 
@@ -506,7 +507,8 @@ table td {
     display: flex;
     gap: 6px;
     padding: 22px 28px 0;
-    max-width: 1400px;
+    width: 100%;
+    max-width: 1800px;
     margin: 0 auto;
     border-bottom: 1px solid var(--border);
 }
@@ -567,7 +569,8 @@ table td {
 }
 
 .section {
-    max-width: 1400px;
+    width: 100%;
+    max-width: 1800px;
     margin: 0 auto;
     padding: 18px 28px 0;
 }

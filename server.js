@@ -415,6 +415,27 @@ function clearRelayRestartTimer(id) {
     }
 }
 
+function hasActiveStream(id) {
+    const info = activeStreams.get(id);
+    if (!info) return false;
+
+    const process = info.process;
+    if (!process || process.exitCode !== null || process.killed) {
+        activeStreams.delete(id);
+        return false;
+    }
+    return true;
+}
+
+function isChannelRuntimeActive(channel) {
+    if (!channel) return false;
+    if (channel.status === 'vod') return hasVodFlag(channel.id);
+    if (channel.mode === 'relay' && channel.relaySubtype === 'loop') {
+        return channel.status === 'relay' && hasRelayFlag(channel.id);
+    }
+    return hasActiveStream(channel.id);
+}
+
 function scheduleRelayRestart(id, reason) {
     clearRelayRestartTimer(id);
 
@@ -1241,7 +1262,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
     }
 
     function getChannelDisplayStatus(channel) {
-        return String(channel.status || '').toLowerCase() === 'offline' ? 'offline' : 'online';
+        return isChannelRuntimeActive(channel) ? 'online' : 'offline';
     }
 
     // API: Listar todos os canais (com filtro, ordenação e paginação opcionais)
@@ -1250,6 +1271,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             return {
                 ...c,
                 channelType: getChannelType(c),
+                runtimeActive: isChannelRuntimeActive(c),
                 displayStatus: getChannelDisplayStatus(c),
                 uptime: (getChannelDisplayStatus(c) === 'online' && c.startedAt) ? Math.floor((Date.now() - c.startedAt) / 1000) : 0
             };
@@ -1532,7 +1554,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 }
 
                 // Segurança: Não permite editar canal ativo
-                if (activeStreams.has(channelId)) {
+                if (isChannelRuntimeActive(channel)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de editá-lo.' }));
                 }
@@ -1645,7 +1667,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             const id = Number(data.id);
 
             // 1. Segurança: Não permite excluir se estiver rodando
-            if (activeStreams.has(id)) {
+            if (isChannelRuntimeActive(channels.find(c => c.id === id))) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify({ status: 'error', message: 'Pare o canal antes de excluí-lo.' }));
             }

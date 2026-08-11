@@ -736,7 +736,7 @@ async function showEditChannelModal(id) {
     const channel = all.find(c => c.id === id);
     if (!channel) return;
     
-    if (channel.status === 'online' || channel.status === 'relay') {
+    if (channel.runtimeActive === true) {
         alert('Por favor, PARE o canal antes de tentar editá-lo.');
         return;
     }
