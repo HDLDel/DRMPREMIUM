@@ -396,6 +396,17 @@ const activeStreams = new Map();
 // Timers de avanço automático para relay-loop
 const relayLoopTimers = new Map();
 
+// Contador de falhas por URL no relay loop (chave por URL, pois índices mudam após remoção)
+const relayLoopFailures = new Map(); // channelId -> Map<url, count>
+// URLs removidas da rotação e o momento (para re-teste de recuperação)
+const relayLoopDeadUrls = new Map(); // channelId -> Map<url, removedAt>
+
+// Limpa o estado de falhas/removidas de um canal relay loop (novo start re-probeia tudo)
+function clearRelayLoopState(id) {
+    relayLoopFailures.delete(id);
+    relayLoopDeadUrls.delete(id);
+}
+
 // Timers de reinício automático após falha/watchdog.
 // Precisam ser canceláveis para que um stop manual vença um restart já agendado.
 const relayRestartTimers = new Map();
@@ -464,11 +475,28 @@ function logChannelEvent(channelId, message) {
     } catch (e) {}
 }
 
+// Avança o índice atual do relay loop para o próximo episódio válido e reagenda o timer.
+// Retorna false se não há episódios suficientes para avançar.
+function advanceRelayLoop(channel) {
+    const urls = channel.relayUrlProbed || channel.relayUrls;
+    if (!urls || urls.length < 2) {
+        console.warn(`[RELAY LOOP] Canal ${channel.id} sem episódios suficientes para avançar.`);
+        return false;
+    }
+    const nextIdx = ((channel.currentUrlIndex || 0) + 1) % urls.length;
+    channel.currentUrlIndex = nextIdx;
+    scheduleRelayLoop(channel);
+    return true;
+}
+
 function scheduleRelayLoop(channel) {
     clearRelayLoopTimer(channel.id);
     const urls = channel.relayUrlProbed || channel.relayUrls;
     const durations = channel.relayUrlDurations || [];
-    if (!urls || urls.length < 2) return;
+    if (!urls || urls.length < 2) {
+        console.warn("[RELAY LOOP] Canal " + channel.id + " sem episódios suficientes para agendar avanço.");
+        return;
+    }
     const idx = channel.currentUrlIndex || 0;
     const dur = durations[idx];
     if (!dur || dur <= 0) return;
@@ -476,16 +504,15 @@ function scheduleRelayLoop(channel) {
     const timer = setTimeout(() => {
         const ch = channels.find(c => c.id === channel.id && c.status === 'relay');
         if (!ch || ch.relaySubtype !== 'loop') return;
-        const nextIdx = ((ch.currentUrlIndex || 0) + 1) % ch.relayUrlProbed.length;
-        ch.currentUrlIndex = nextIdx;
+        if (!advanceRelayLoop(ch)) return;
         saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels no avanço automático:', e));
         console.log("[RELAY LOOP] Canal " + ch.id + " avançou automático para posição " + ch.currentUrlIndex);
-        scheduleRelayLoop(ch);
     }, dur * 1000);
     relayLoopTimers.set(channel.id, timer);
 }
 
 async function startRelayLoop(channel) {
+    clearRelayLoopState(channel.id);
     console.log("[RELAY LOOP] Probing " + channel.relayUrls.length + " URLs para canal " + channel.id + "...");
     const results = await Promise.all(channel.relayUrls.map(u => probeUrlDuration(u)));
     const probed = [];
@@ -525,6 +552,104 @@ async function startRelayLoop(channel) {
     return { status: 'success', mode: 'relay-loop', validUrls: probed.length, totalUrls: channel.relayUrls.length };
 }
 
+// Remove uma URL da rotação após falhas repetidas, ajustando o índice atual
+function removeRelayLoopUrl(channel, url) {
+    const probed = channel.relayUrlProbed || [];
+    const durations = channel.relayUrlDurations || [];
+    const pos = probed.indexOf(url);
+    if (pos === -1) return;
+    const wasCurrent = (channel.currentUrlIndex || 0) === pos;
+    probed.splice(pos, 1);
+    if (durations.length) durations.splice(pos, 1);
+    if (wasCurrent) {
+        // Índice agora aponta para o próximo episódio da lista (que virou o "atual")
+        channel.currentUrlIndex = pos;
+    } else if ((channel.currentUrlIndex || 0) > pos) {
+        channel.currentUrlIndex -= 1;
+    }
+    const dead = relayLoopDeadUrls.get(channel.id) || new Map();
+    dead.set(url, Date.now());
+    relayLoopDeadUrls.set(channel.id, dead);
+}
+
+// Trata falha de transmux de uma URL do relay loop: conta, remove após 4 falhas e
+// avança imediatamente se for o episódio atual (sem esperar o timer)
+function handleRelayLoopFailure(channel, idx) {
+    const urls = channel.relayUrlProbed || channel.relayUrls;
+    if (!urls || !urls[idx]) return;
+    const url = urls[idx];
+    const fails = relayLoopFailures.get(channel.id) || new Map();
+    const count = (fails.get(url) || 0) + 1;
+    fails.set(url, count);
+    relayLoopFailures.set(channel.id, fails);
+    const isCurrent = (channel.currentUrlIndex || 0) === idx;
+    console.warn(`[RELAY LOOP] Canal ${channel.id} falha ${count}/4 na URL ${idx}: ${url}`);
+
+    if (count >= 4) {
+        removeRelayLoopUrl(channel, url);
+        console.warn(`[RELAY LOOP] Canal ${channel.id}: URL removida da rotação por ${count} falhas: ${url}`);
+        saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels ao remover URL:', e));
+    }
+
+    if (isCurrent) {
+        if (count < 4) {
+            if (advanceRelayLoop(channel)) {
+                saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels ao avançar por falha:', e));
+                console.log("[RELAY LOOP] Canal " + channel.id + " avançou por falha para posição " + channel.currentUrlIndex);
+            }
+        } else {
+            // URL atual removida: re-sincroniza o timer com o novo episódio atual
+            scheduleRelayLoop(channel);
+        }
+    }
+}
+
+// Reintroduz uma URL que voltou a funcionar, na posição original da lista canônica
+function reintroduceRelayLoopUrl(channel, url, duration) {
+    const probeUrls = channel.relayUrlProbed || [];
+    if (probeUrls.includes(url)) {
+        const dead = relayLoopDeadUrls.get(channel.id);
+        if (dead) dead.delete(url);
+        return;
+    }
+    const durations = channel.relayUrlDurations || [];
+    const canonical = channel.relayUrls || [];
+    const origPos = canonical.indexOf(url);
+    let insertPos = probeUrls.length;
+    for (let i = 0; i < probeUrls.length; i++) {
+        const pos = canonical.indexOf(probeUrls[i]);
+        if (pos > origPos) { insertPos = i; break; }
+    }
+    probeUrls.splice(insertPos, 0, url);
+    durations.splice(insertPos, 0, duration);
+    if ((channel.currentUrlIndex || 0) >= insertPos) channel.currentUrlIndex += 1;
+    const dead = relayLoopDeadUrls.get(channel.id);
+    if (dead) dead.delete(url);
+    saveChannels().catch(e => console.error('[RELAY LOOP] Erro ao salvar channels na reintrodução:', e));
+    console.log(`[RELAY LOOP] Canal ${channel.id}: URL reincorporada na posição ${insertPos}: ${url}`);
+}
+
+// Re-teste periódico (1x por hora) das URLs removidas: se voltaram a funcionar, reintroduz
+setInterval(() => {
+    if (relayLoopDeadUrls.size === 0) return;
+    for (const [channelId, deadMap] of relayLoopDeadUrls) {
+        const channel = channels.find(c => c.id === channelId && c.mode === 'relay' && c.relaySubtype === 'loop');
+        if (!channel) continue;
+        const entries = [...deadMap.entries()];
+        for (const [url, removedAt] of entries) {
+            // Evita re-teste imediato pós-remoção (só testa após 5 min fora)
+            if (Date.now() - removedAt < 5 * 60 * 1000) continue;
+            probeUrlDuration(url).then(duration => {
+                if (duration && duration > 0) {
+                    reintroduceRelayLoopUrl(channel, url, duration);
+                } else {
+                    console.log(`[RELAY LOOP] Canal ${channelId}: URL continua fora (re-teste falhou): ${url}`);
+                }
+            });
+        }
+    }
+}, 60 * 60 * 1000);
+
 function probeUrlDuration(url) {
     return new Promise((resolve) => {
         const proc = spawn('ffprobe', [
@@ -562,6 +687,40 @@ function probeUrlDuration(url) {
             resolve(null);
         }, 15000);
     });
+}
+
+// Flags HTTP de resiliência: reconecta em quedas de rede e em respostas 5xx (503 etc.)
+// do servidor de origem (evita "Stream ends prematurely" e "HTTP error 503" derrubarem o canal)
+const HTTP_RECONNECT_FLAGS = [
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_at_eof', '1',
+    '-reconnect_on_network_error', '1',
+    '-reconnect_on_http_error', '5xx',
+    '-reconnect_delay_max', '5',
+    '-timeout', '60000000'
+];
+
+// Diretivas por arquivo no playlist concat (precisam de -safe 0, já usado)
+const CONCAT_HTTP_OPTION_LINES = [
+    'option reconnect 1',
+    'option reconnect_streamed 1',
+    'option reconnect_at_eof 1',
+    'option reconnect_on_network_error 1',
+    'option reconnect_on_http_error 5xx',
+    'option reconnect_delay_max 5',
+    'option timeout 60000000'
+];
+
+// Gera o conteúdo do playlist concat de URLs remotas com opções de reconexão HTTP por arquivo.
+// Sem isso, um 503/truncamento transitório numa única URL derruba o canal inteiro.
+function buildRelayPlaylist(urls) {
+    const lines = ['ffconcat version 1.0'];
+    for (const u of urls) {
+        lines.push(`file '${u.replace(/'/g, "'\\''")}'`);
+        lines.push(...CONCAT_HTTP_OPTION_LINES);
+    }
+    return lines.join('\r\n');
 }
 
 // Aguarda o processo terminar com timeout e tratamento de erro
@@ -888,7 +1047,7 @@ async function startChannel(id) {
                 return { status: 'error', message: errMsg };
             }
             console.log(`[RELAY SYNC ${id}] ${validUrls.length}/${urls.length} URLs válidas`);
-            const plContent = validUrls.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+            const plContent = buildRelayPlaylist(validUrls);
             const plPath = path.join(outputDir, 'playlist_urls.txt');
             fs.writeFileSync(plPath, plContent);
             playlistPath = plPath;
@@ -1461,7 +1620,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                         return res.end(JSON.stringify({ status: 'error', message: 'Forneça ao menos uma URL de origem para Relay.' }));
                     }
                     if (relayST === 'sync') {
-                        const plContent = relayUrlList.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+                        const plContent = buildRelayPlaylist(relayUrlList);
                         const plPath = path.join(channelOutputDir, 'playlist_urls.txt');
                         fs.writeFileSync(plPath, plContent);
                         playlistFilePath = plPath;
@@ -1577,7 +1736,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                     const chOutDir = path.join(CHANNELS_DIR, channelId.toString());
                     if (!fs.existsSync(chOutDir)) fs.mkdirSync(chOutDir, { recursive: true });
                     if (relayST === 'sync') {
-                        const plContent = relayUrlList.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join('\r\n');
+                        const plContent = buildRelayPlaylist(relayUrlList);
                         const plPath = path.join(chOutDir, 'playlist_urls.txt');
                         fs.writeFileSync(plPath, plContent);
                         playlistFilePath = plPath;
@@ -1877,7 +2036,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                     if (channel.relayUrls && channel.relayUrls.length > 0) {
                         const outDir = path.join(CHANNELS_DIR, id.toString());
                         if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-                        const plContent = channel.relayUrls.map(u => "file '" + u.replace(/'/g, "'\\''") + "'").join('\r\n');
+                        const plContent = buildRelayPlaylist(channel.relayUrls);
                         const plPath = path.join(outDir, 'playlist_urls.txt');
                         fs.writeFileSync(plPath, plContent);
                         channel.playlistFilePath = plPath;
@@ -2408,6 +2567,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             }
             // Transmux MP4 → MPEG-TS on-the-fly (sem re-encode, só muda o container)
             const ffmpeg = spawn(FFMPEG_PATH, [
+                ...HTTP_RECONNECT_FLAGS,
                 '-i', targetUrl,
                 '-c', 'copy',
                 '-f', 'mpegts',
@@ -2415,22 +2575,65 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             ]);
             let stderrLog = '';
             let killed = false;
+            let failureHandled = false;
+            let gotData = false;
+
             const killFfmpeg = () => {
                 if (killed) return;
                 killed = true;
                 try { ffmpeg.kill('SIGKILL'); } catch (e) {}
             };
+
+            // Redireciona o player para o próximo episódio válido (skip sem travar)
+            const redirectToNextValid = () => {
+                const probed = channel.relayUrlProbed || channel.relayUrls;
+                if (!probed || probed.length === 0) {
+                    res.writeHead(502);
+                    return res.end('Transmux failed');
+                }
+                const nextIdx = ((idx + 1) % probed.length + probed.length) % probed.length;
+                const host = req.headers.host || 'localhost';
+                const protocol = req.socket.encrypted ? 'https' : 'http';
+                res.writeHead(302, {
+                    'Location': `${protocol}://${host}/canais/${channelId}/${nextIdx}.ts`,
+                    'Access-Control-Allow-Origin': '*'
+                });
+                res.end();
+            };
+
+            const countFailure = (reason) => {
+                if (failureHandled) return;
+                failureHandled = true;
+                console.error("[RELAY LOOP] FFmpeg URL " + idx + " falhou (" + reason + "): " + stderrLog.slice(-300));
+                handleRelayLoopFailure(channel, idx);
+            };
+
+            // Watchdog de abertura: se o ffmpeg não produzir dados em 20s
+            // (ex: retry infinito do reconnect), mata e conta como falha
+            const openWatchdog = setTimeout(() => {
+                if (gotData || killed) return;
+                countFailure('sem dados em 20s');
+                killFfmpeg();
+            }, 20000);
+
+            ffmpeg.stdout.on('data', () => { gotData = true; });
+
             ffmpeg.stderr.on('data', d => {
                 stderrLog = (stderrLog + d.toString()).slice(-4096);
             });
+
             ffmpeg.on('error', (e) => {
                 console.error("[RELAY LOOP] Erro FFmpeg URL " + idx + ": " + e.message);
-                if (!res.headersSent) { res.writeHead(502); res.end('Transmux error'); }
+                countFailure('spawn error');
+                if (!res.headersSent) redirectToNextValid();
             });
+
             ffmpeg.on('close', (code) => {
-                if (code !== 0 && !res.headersSent && !killed) {
-                    console.error("[RELAY LOOP] FFmpeg exit " + code + " URL " + idx + ": " + stderrLog.slice(-300));
-                    res.writeHead(502); res.end('Transmux failed');
+                clearTimeout(openWatchdog);
+                if (killed) return;
+                if (code !== 0) {
+                    countFailure('exit ' + code);
+                    if (!res.headersSent) redirectToNextValid();
                 }
             });
             // Mata o ffmpeg se o cliente desconectar para não vazar processos
