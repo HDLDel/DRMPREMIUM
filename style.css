@@ -907,6 +907,56 @@ table td {
     background: var(--surface-3);
 }
 
+.channel-preparation {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 170px;
+    color: var(--text-mute);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .45px;
+    white-space: nowrap;
+}
+
+.channel-preparation small {
+    max-width: 230px;
+    overflow: hidden;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.preparation-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 3px var(--amber-soft);
+}
+
+.preparation-loading .preparation-dot {
+    animation: preparation-pulse 1.2s ease-in-out infinite;
+}
+
+.preparation-error {
+    color: var(--red);
+}
+
+.preparation-error .preparation-dot {
+    background: var(--red);
+    box-shadow: 0 0 0 3px var(--red-soft);
+    animation: none;
+}
+
+@keyframes preparation-pulse {
+    50% { opacity: .45; transform: scale(.78); }
+}
+
 .type-badge {
     display: inline-flex;
     align-items: center;

@@ -439,7 +439,18 @@ function getChannelTypeLabel(channel) {
 }
 
 function isChannelOnline(channel) {
-    return String(channel.status || '').toLowerCase() !== 'offline';
+    return String(channel.displayStatus || channel.status || '').toLowerCase() === 'online';
+}
+
+function getChannelPreparationMarkup(channel) {
+    const prep = channel.preparation || channel.relayStartup;
+    if (!prep) return '<span class="stat-muted">-</span>';
+
+    const phase = String(prep.phase || '').toLowerCase();
+    const isError = phase === 'error';
+    const label = isError ? 'FALHA' : phase === 'probing' ? 'VALIDANDO' : 'BAIXANDO';
+    const message = prep.message || 'Preparando canal...';
+    return `<span class="channel-preparation ${isError ? 'preparation-error' : 'preparation-loading'}" title="${escapeHtml(message)}"><span class="preparation-dot"></span>${label}<small>${escapeHtml(message)}</small></span>`;
 }
 
 // Function to load and render channels
@@ -496,7 +507,7 @@ async function loadAndRenderChannels(filter = '') {
             const message = hasActiveFilter
                 ? 'Nenhum canal corresponde aos filtros atuais.'
                 : 'Nenhum canal configurado. Crie um novo!';
-            tbl.innerHTML = `<tr class="empty-row"><td colspan="6">${message}</td></tr>`;
+            tbl.innerHTML = `<tr class="empty-row"><td colspan="7">${message}</td></tr>`;
             return;
         }
 
@@ -569,8 +580,9 @@ function updatePaginationControls(totalCount, totalPages) {
 
 function createChannelRowContent(row, channel) {
     row.innerHTML = '';
-    row.dataset.channelStatus = channel.status;
+    row.dataset.channelStatus = channel.displayStatus || channel.status;
     row.dataset.channelType = getChannelType(channel);
+    row.dataset.channelPreparation = JSON.stringify(channel.preparation || null);
     
     const idCell = row.insertCell();
     idCell.innerHTML = `<span class="cell-id">${channel.id}</span>`;
@@ -588,6 +600,9 @@ function createChannelRowContent(row, channel) {
     const online = isChannelOnline(channel);
     statusCell.innerHTML = `<span class="status-badge ${online ? 'status-online' : 'status-offline'}">${online ? 'ONLINE' : 'OFFLINE'}</span>`;
 
+    const preparationCell = row.insertCell();
+    preparationCell.innerHTML = getChannelPreparationMarkup(channel);
+
     const type = getChannelType(channel);
     const typeCell = row.insertCell();
     typeCell.innerHTML = `<span class="type-badge type-${type}">${getChannelTypeLabel(channel)}</span>`;
@@ -603,8 +618,10 @@ function createChannelRowContent(row, channel) {
 
 function buildChannelActions(channel) {
     let actionBtns = '';
+    const online = isChannelOnline(channel);
+    const preparing = Boolean(channel.preparation && channel.preparation.phase !== 'error');
     
-    if (channel.status === 'offline') {
+    if (!online && !preparing) {
         actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${svgIcon('play')}</button>`;
     } else {
         actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${svgIcon('stop')}</button>`;
@@ -616,14 +633,14 @@ function buildChannelActions(channel) {
     
     actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${svgIcon('link')}</button>`;
 
-    if (channel.status !== 'offline') {
+    if (online) {
         actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
     }
     
     actionBtns += " " +
         `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
         `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
-        `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${channel.status}" title="Excluir">${svgIcon('trash')}</button>`;
+        `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${online || preparing ? 'relay' : 'offline'}" title="Excluir">${svgIcon('trash')}</button>`;
     
     return `<div class="action-bar">${actionBtns}</div>`;
 }
@@ -631,12 +648,18 @@ function buildChannelActions(channel) {
 function updateChannelRowContent(row, channel) {
     // Atualizar status, tipo e uptime sem reconstruir a linha inteira.
     const statusCell = row.cells[2];
-    const typeCell = row.cells[3];
-    const uptimeCell = row.cells[4];
+    const preparationCell = row.cells[3];
+    const typeCell = row.cells[4];
+    const uptimeCell = row.cells[5];
     const online = isChannelOnline(channel);
     const newStatusHtml = `<span class="status-badge ${online ? 'status-online' : 'status-offline'}">${online ? 'ONLINE' : 'OFFLINE'}</span>`;
     if (statusCell.innerHTML !== newStatusHtml) {
         statusCell.innerHTML = newStatusHtml;
+    }
+
+    const newPreparationHtml = getChannelPreparationMarkup(channel);
+    if (preparationCell.innerHTML !== newPreparationHtml) {
+        preparationCell.innerHTML = newPreparationHtml;
     }
 
     const type = getChannelType(channel);
@@ -654,10 +677,13 @@ function updateChannelRowContent(row, channel) {
 
     // Reconstruir a célula de ações (botão Iniciar/Parar, ASSISTIR, etc.)
     // quando o status mudar, para o ícone refletir o estado sem recarregar a página
-    if (row.dataset.channelStatus !== channel.status || row.dataset.channelType !== type) {
-        row.dataset.channelStatus = channel.status;
+    const displayStatus = channel.displayStatus || channel.status;
+    const preparationKey = JSON.stringify(channel.preparation || null);
+    if (row.dataset.channelStatus !== displayStatus || row.dataset.channelType !== type || row.dataset.channelPreparation !== preparationKey) {
+        row.dataset.channelStatus = displayStatus;
         row.dataset.channelType = type;
-        const actionsCell = row.cells[5];
+        row.dataset.channelPreparation = preparationKey;
+        const actionsCell = row.cells[6];
         if (actionsCell) actionsCell.innerHTML = buildChannelActions(channel);
     }
 }
