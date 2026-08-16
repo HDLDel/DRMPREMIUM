@@ -401,6 +401,64 @@ const activeStreams = new Map();
 // Timers de avanço automático para relay-loop
 const relayLoopTimers = new Map();
 
+// Guardian: máximo de falhas consecutivas antes da pausa e tempo de pausa
+const RELAY_GUARDIAN_MAX_FAILS = 5;
+const RELAY_GUARDIAN_RETRY_MS = 10 * 60 * 1000;
+const relayGuardianPausedAt = new Map(); // channelId -> timestamp da pausa
+
+// Transmux on-the-fly do relay loop (1 ffmpeg leve por pessoa assistindo):
+// controlados para nunca vazar processos quando o cliente desconecta.
+const relayTransmuxProcs = new Map(); // channelId -> Set<proc> (procs de transmux ativos)
+const RELAY_TRANSMUX_MAX_PER_CHANNEL = 20; // trava de segurança por canal
+const RELAY_TRANSMUX_SWEEP_MS = 5 * 60 * 1000; // varredura periódica de limpeza
+
+function trackRelayTransmux(channelId, proc) {
+    if (!relayTransmuxProcs.has(channelId)) relayTransmuxProcs.set(channelId, new Set());
+    relayTransmuxProcs.get(channelId).add(proc);
+    proc.on('exit', () => {
+        const procs = relayTransmuxProcs.get(channelId);
+        if (!procs) return;
+        procs.delete(proc);
+        if (procs.size === 0) relayTransmuxProcs.delete(channelId);
+    });
+}
+
+function killRelayTransmuxProcs(channelId) {
+    const procs = relayTransmuxProcs.get(channelId);
+    if (!procs) return;
+    for (const proc of procs) {
+        try { proc.kill('SIGKILL'); } catch (e) {}
+    }
+    relayTransmuxProcs.delete(channelId);
+}
+
+function killRelayTransmuxProc(proc) {
+    try { proc.kill('SIGKILL'); } catch (e) {}
+}
+
+// Varredura periódica: derruba transmux órfãos (cliente foi embora mas o processo
+// de alguma forma sobreviveu) e aplica a trava por canal quando há excesso.
+setInterval(() => {
+    for (const [channelId, procs] of relayTransmuxProcs) {
+        const procsArr = Array.from(procs);
+        let killed = 0;
+        // Trava: se passar do limite, derruba os mais antigos até caber
+        while (procsArr.length > RELAY_TRANSMUX_MAX_PER_CHANNEL) {
+            const oldest = procsArr.shift();
+            try { oldest.kill('SIGKILL'); } catch (e) {}
+            killed++;
+        }
+        // Órfãos: processo marcado como desconectado e que ainda está vivo
+        for (const proc of procsArr) {
+            if (proc.__relayClientGone && proc.exitCode === null) {
+                try { proc.kill('SIGKILL'); } catch (e) {}
+                killed++;
+            }
+        }
+        if (killed > 0) console.warn(`[RELAY LOOP] Varredura de transmux: canal ${channelId} teve ${killed} processos encerrados (cliente desconectado/excesso).`);
+    }
+}, RELAY_TRANSMUX_SWEEP_MS);
+
 // Contador de falhas por URL no relay loop (chave por URL, pois índices mudam após remoção)
 const relayLoopFailures = new Map(); // channelId -> Map<url, count>
 // URLs removidas da rotação e o momento (para re-teste de recuperação)
@@ -451,6 +509,10 @@ function isRelaySyncSubtype(subtype) {
 
 function isRelayCacheSubtype(subtype) {
     return subtype === 'loop-cache' || subtype === 'sync-cache';
+}
+
+function isRelayDirectSubtype(subtype) {
+    return subtype === 'sync' || subtype === 'loop';
 }
 
 // Caminho do arquivo de episódio em cache (usado pelo concat local e pelo downloader)
@@ -913,6 +975,7 @@ async function startRelayCached(channel) {
 function clearRelayLoopState(id) {
     relayLoopFailures.delete(id);
     relayLoopDeadUrls.delete(id);
+    killRelayTransmuxProcs(id);
 }
 
 // Timers de reinício automático após falha/watchdog.
@@ -1468,6 +1531,14 @@ async function getSystemStats() {
 async function startChannel(id) {
     const channel = channels.find(c => c.id === id);
     if (!channel) return { status: 'error', message: 'Canal não encontrado' };
+
+    // Loop puro (sem cache): repasse direto do link ao cliente (playlist virtual +
+    // transmux on-the-fly por requisição). Não usa ffmpeg persistente nem activeStreams.
+    if (channel.mode === 'relay' && channel.relaySubtype === 'loop') {
+        if (channel.status === 'relay' && hasRelayFlag(channel.id)) return { status: 'error', message: 'Canal já rodando' };
+        return startRelayLoop(channel);
+    }
+
     if (activeStreams.has(id)) return { status: 'error', message: 'Canal já rodando' };
 
     // Reserva o slot imediatamente para evitar que duas chamadas concorrentes iniciem o mesmo canal
@@ -1482,7 +1553,7 @@ async function startChannel(id) {
     }
     if (channel.mode === 'relay') {
         setRelayFlag(id);
-        console.log("[RELAY FLAG] Flag criada para canal " + id + " (sync)");
+        console.log("[RELAY FLAG] Flag criada para canal " + id + " (relay)");
     }
 
     const outputDir = path.join(CHANNELS_DIR, id.toString());
@@ -1554,8 +1625,8 @@ async function startChannel(id) {
         playlistPath = path.join(outputDir, 'playlist.txt');
     }
 
-    // Relay-sync: probeia URLs, filtra válidas, gera playlist (evita URL morta travar o FFmpeg)
-    if (channel.mode === 'relay' && channel.relaySubtype === 'sync') {
+    // Relay-sync/loop (sem cache): probeia URLs, filtra válidas, gera playlist (evita URL morta travar o FFmpeg)
+    if (channel.mode === 'relay' && isRelayDirectSubtype(channel.relaySubtype)) {
         const urls = channel.relayUrls || [];
         if (urls.length > 0) {
             console.log(`[RELAY SYNC ${id}] Probeando ${urls.length} URLs...`);
@@ -1584,7 +1655,7 @@ async function startChannel(id) {
         '-stream_loop', '-1'
     ];
 
-    if (channel.inputType === 'concat' || (channel.mode === 'relay' && channel.relaySubtype === 'sync')) {
+    if (channel.inputType === 'concat' || (channel.mode === 'relay' && isRelayDirectSubtype(channel.relaySubtype))) {
         args.push('-f', 'concat', '-safe', '0');
     }
 
@@ -1902,25 +1973,13 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             const channel = channels.find(c => c.id === id);
             if (channel) channel.userStopped = false;
             if (channel && channel.mode === 'relay') {
-                if (isRelaySyncSubtype(channel.relaySubtype)) {
-                    if (!channel.relayUrls || channel.relayUrls.length === 0) {
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhuma URL configurada.' }));
-                    }
-                    const result = await startChannel(id);
+                if (!channel.relayUrls || channel.relayUrls.length === 0) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify(result));
-                } else {
-                    if (!channel.relayUrls || channel.relayUrls.length === 0) {
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        return res.end(JSON.stringify({ status: 'error', message: 'Nenhuma URL configurada.' }));
-                    }
-                    const result = isRelayCacheSubtype(channel.relaySubtype)
-                        ? await startChannel(id)
-                        : await startRelayLoop(channel);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    return res.end(JSON.stringify(result));
+                    return res.end(JSON.stringify({ status: 'error', message: 'Nenhuma URL configurada.' }));
                 }
+                const result = await startChannel(id);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify(result));
             }
             const result = await startChannel(id); 
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2430,6 +2489,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
             }
 
             clearRelayLoopTimer(id);
+            clearRelayLoopState(id);
 
             // Relay: remove flag
             removeRelayFlag(id);
@@ -2470,9 +2530,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                     return { id: ch.id, name: ch.name, mode: ch.relaySubtype, status: 'already-running', message: 'RELAY LOOP já está ativo.' };
                 }
 
-                const launch = ch.mode === 'relay' && isRelayLoopSubtype(ch.relaySubtype)
-                    ? (isRelayCacheSubtype(ch.relaySubtype) ? startChannel(ch.id) : startRelayLoop(ch))
-                    : startChannel(ch.id);
+                const launch = startChannel(ch.id);
                 launch.then(result => {
                     console.log(`[STARTALL] Canal ${ch.id} (${ch.name}) finalizou: ${result?.status || 'desconhecido'}${result?.message ? ` - ${result.message}` : ''}`);
                 }).catch(error => {
@@ -2585,9 +2643,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 channel.userStopped = false;
                 channel.startedAt = undefined;
                 await saveChannels();
-                const result = isRelayCacheSubtype(channel.relaySubtype)
-                    ? await startChannel(id)
-                    : await startRelayLoop(channel);
+                const result = await startChannel(id);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 return res.end(JSON.stringify(result));
             }
@@ -3069,7 +3125,107 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                 return res.end('Canal relay não configurado');
             }
 
-            if (isRelaySyncSubtype(channel.relaySubtype) || isRelayLoopSubtype(channel.relaySubtype)) {
+            if (channel.relaySubtype === 'loop') {
+                // LOOP PURO: repasse direto do link ao cliente.
+                // Playlist virtual + transmux on-the-fly por requisição (sem re-encode).
+                const urls = channel.relayUrlProbed || channel.relayUrls || [channel.sourceUrl];
+                const urlsLen = urls.length;
+
+                if (requestedFile === 'index.m3u8') {
+                    // Gera playlist HLS Virtual de alta compatibilidade com #EXT-X-DISCONTINUITY
+                    const startIdx = channel.currentUrlIndex || 0;
+                    const durations = channel.relayUrlDurations || [];
+
+                    // Calcula o target duration (maior duração entre os vídeos, ou padrão 7200)
+                    let maxDur = 7200;
+                    if (durations.length > 0) {
+                        maxDur = Math.ceil(Math.max(...durations.filter(d => d > 0)));
+                    }
+
+                    let lines = '#EXTM3U\n';
+                    lines += '#EXT-X-VERSION:3\n';
+                    lines += '#EXT-X-PLAYLIST-TYPE:VOD\n';
+                    lines += `#EXT-X-TARGETDURATION:${maxDur}\n`;
+                    lines += `#EXT-X-MEDIA-SEQUENCE:0\n`;
+
+                    const host = req.headers.host || 'localhost';
+                    const protocol = req.socket.encrypted ? 'https' : 'http';
+
+                    for (let i = 0; i < urlsLen * 100; i++) {
+                        const idx = (startIdx + i) % urlsLen;
+                        const dur = durations[idx] ? durations[idx].toFixed(6) : '3600.000000';
+
+                        lines += '#EXT-X-DISCONTINUITY\n';
+                        lines += `#EXTINF:${dur},\n`;
+                        lines += `${protocol}://${host}/canais/${channelId}/${idx}.ts\n`;
+                    }
+
+                    res.writeHead(200, {
+                        'Content-Type': 'application/vnd.apple.mpegurl',
+                        'Access-Control-Allow-Origin': '*',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate'
+                    });
+                    return res.end(lines);
+                }
+
+                // requestedFile é o índice (ex: /canais/5/0 → proxy urls[0])
+                const idx = parseInt(requestedFile);
+                if (isNaN(idx) || idx < 0 || idx >= urlsLen) {
+                    res.writeHead(404);
+                    return res.end('Índice inválido');
+                }
+                const targetUrl = urls[idx];
+                if (!targetUrl) {
+                    res.writeHead(404);
+                    return res.end('URL de destino vazia');
+                }
+
+                // Transmux MP4 → MPEG-TS on-the-fly (sem re-encode, só muda o container).
+                // 1 ffmpeg leve por requisição. Sempre morto quando o cliente desconecta:
+                // res/req 'close' + varredura periódica + trava por canal.
+                const ffmpeg = spawn(FFMPEG_PATH, [
+                    '-i', targetUrl,
+                    '-c', 'copy',
+                    '-f', 'mpegts',
+                    '-'
+                ]);
+                trackRelayTransmux(channelId, ffmpeg);
+
+                let stderrLog = '';
+                ffmpeg.stderr.on('data', d => { if (stderrLog.length < 2000) stderrLog += d; });
+                ffmpeg.on('error', (e) => {
+                    console.error("[RELAY LOOP] Erro FFmpeg URL " + idx + ": " + e.message);
+                    if (!res.headersSent) { res.writeHead(502); res.end('Transmux error'); }
+                });
+                ffmpeg.on('close', (code) => {
+                    if (ffmpeg.__relayClientGone) return;
+                    if (code !== 0) {
+                        handleRelayLoopFailure(channel, idx);
+                        if (!res.headersSent) {
+                            console.error("[RELAY LOOP] FFmpeg exit " + code + " URL " + idx + ": " + stderrLog.slice(-300));
+                            res.writeHead(502);
+                            res.end('Transmux failed');
+                        }
+                    }
+                });
+
+                const killOnDisconnect = () => {
+                    ffmpeg.__relayClientGone = true;
+                    killRelayTransmuxProc(ffmpeg);
+                };
+                res.on('close', killOnDisconnect);
+                req.on('close', killOnDisconnect);
+
+                res.writeHead(200, {
+                    'Content-Type': 'video/MP2T',
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'no-cache'
+                });
+                ffmpeg.stdout.pipe(res);
+                return;
+            }
+
+            if (isRelaySyncSubtype(channel.relaySubtype) || isRelayCacheSubtype(channel.relaySubtype)) {
                 const filePath = path.join(CHANNELS_DIR, channelId.toString(), requestedFile);
                 if (requestedFile === 'index.m3u8' && !fs.existsSync(filePath)) {
                     // Espera até 12 segundos (60 * 200ms) para o FFmpeg criar o arquivo inicial
@@ -3223,30 +3379,47 @@ setInterval(() => {
     });
 
     // Relay Guardian: revive relay (sync e loop) offline ou sem processo ativo
-    // Limite de tentativas consecutivas: se o canal falhar ao subir muitas vezes, pausa o guardian
+    // Limite de tentativas consecutivas: após 5 falhas, pausa por um tempo e
+    // depois tenta de novo (não desiste para sempre).
     for (const channel of channels) {
         if (channel.mode === 'relay' && (isRelaySyncSubtype(channel.relaySubtype) || isRelayLoopSubtype(channel.relaySubtype))) {
-            // O LOOP legado não mantém um processo FFmpeg em activeStreams:
-            // ele usa a rotação direta por timer e não deve ser reiniciado pelo Guardian.
-            if (channel.relaySubtype === 'loop') continue;
             // Canal parado manualmente pelo usuário não pode ser revivido
             if (channel.userStopped) continue;
             // Start em andamento (janela de cache baixando, ainda sem FFmpeg): não reviver
             const st = relayCacheState.get(channel.id);
             if (st && !st.ffmpegPid) continue;
-            const isAlive = activeStreams.has(channel.id);
+
+            let isAlive;
+            if (channel.relaySubtype === 'loop') {
+                // Loop puro não tem processo persistente: está vivo se tem a flag e status relay
+                isAlive = channel.status === 'relay' && hasRelayFlag(channel.id);
+            } else {
+                isAlive = activeStreams.has(channel.id);
+            }
             if (!isAlive && channel.status !== 'offline') {
                 console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) sem FFmpeg ativo (status=${channel.status}). Corrigindo...`);
                 channel.status = 'offline';
             }
             if (channel.status === 'offline') {
-                channel.restartFails = (channel.restartFails || 0) + 1;
-                if (channel.restartFails > 5) {
-                    console.warn(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) falhou ${channel.restartFails} vezes seguidas. Pausando auto-restart.`);
-                    continue;
+                const pausedAt = relayGuardianPausedAt.get(channel.id);
+                if ((channel.restartFails || 0) > RELAY_GUARDIAN_MAX_FAILS) {
+                    if (!pausedAt) {
+                        relayGuardianPausedAt.set(channel.id, Date.now());
+                        console.warn(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) falhou ${channel.restartFails} vezes. Pausando auto-restart por ${Math.round(RELAY_GUARDIAN_RETRY_MS / 60000)}min.`);
+                        continue;
+                    }
+                    if (Date.now() - pausedAt < RELAY_GUARDIAN_RETRY_MS) continue;
+                    console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) parado há ${Math.round((Date.now() - pausedAt) / 60000)}min. Retomando auto-restart.`);
+                    channel.restartFails = 0;
+                    relayGuardianPausedAt.delete(channel.id);
+                } else {
+                    relayGuardianPausedAt.delete(channel.id);
                 }
+                channel.restartFails = (channel.restartFails || 0) + 1;
                 console.log(`[RELAY GUARDIAN] Canal ${channel.id} (${channel.name}) offline. Reiniciando relay...`);
                 scheduleRelayRestart(channel.id, 'guardian');
+            } else {
+                relayGuardianPausedAt.delete(channel.id);
             }
         }
     }
@@ -3368,16 +3541,19 @@ setTimeout(parseNginxAccessLog, 5000);
      }
 
     // Auto-start de canais Relay Loop (ignora canais parados manualmente)
+    // Loop puro: repasse direto — startRelayLoop faz o probe e cria a flag.
     for (const channel of channels) {
-        if (channel.mode === 'relay' && isRelayLoopSubtype(channel.relaySubtype) && !channel.userStopped) {
-            channel.status = 'relay';
-            if (!hasRelayFlag(channel.id)) {
-                setRelayFlag(channel.id);
-                console.log("[AUTO-START] Flag Relay criada para canal " + channel.id + " (" + channel.name + ")");
-            }
+        if (channel.mode === 'relay' && channel.relaySubtype === 'loop' && !channel.userStopped) {
             console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
-            const starter = isRelayCacheSubtype(channel.relaySubtype) ? startChannel(channel.id) : startRelayLoop(channel);
-            starter.catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
+            startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
+        }
+    }
+
+    // Auto-start de canais Relay Loop-Cache (baixa episódios e serve via ffmpeg persistente)
+    for (const channel of channels) {
+        if (channel.mode === 'relay' && channel.relaySubtype === 'loop-cache' && !channel.userStopped) {
+            console.log("[AUTO-START] Iniciando Relay Loop-Cache para canal " + channel.id + " (" + channel.name + ")");
+            startChannel(channel.id).catch(e => console.error("[AUTO-START] Erro no Relay Loop-Cache do canal " + channel.id + ":", e));
         }
     }
     // Cria flag para relay-sync que ainda nao tem flag (ignora canais parados manualmente)
