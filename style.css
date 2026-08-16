@@ -999,6 +999,12 @@ table td {
     background: var(--amber-soft);
 }
 
+.type-relay-loop-cache,
+.type-relay-sync-cache {
+    color: var(--cyan);
+    background: var(--cyan-soft);
+}
+
 /* ============================================================
    BOTÕES
    ============================================================ */

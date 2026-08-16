@@ -130,14 +130,16 @@
     <option value="vod">VOD</option>
     <option value="relay-sync">RELAY SYNC</option>
     <option value="relay-loop">RELAY LOOP</option>
+    <option value="relay-sync-cache">SYNC CACHE</option>
+    <option value="relay-loop-cache">LOOP CACHE</option>
 </select>
                     </div>
                     <div class="btn-group">
-                        <button class="btn-primary" id="btn-start-all">
+                        <button type="button" class="btn-primary" id="btn-start-all">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                             Iniciar Todos
                         </button>
-                        <button class="btn-stop" id="btn-stop-all">
+                        <button type="button" class="btn-stop" id="btn-stop-all">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
                             Parar Todos
                         </button>
@@ -361,8 +363,10 @@
                     <div class="field">
                         <label for="relay-subtype-select">Tipo de Relay</label>
                         <select id="relay-subtype-select">
-                            <option value="loop">FILA DE VÍDEOS (LOOP - BAIXO CPU / ZERO DISK)</option>
-                            <option value="sync">RETRANSMISSÃO SINCRONIZADA (FFMPEG SYNC)</option>
+                            <option value="loop">LOOP (LEGADO - SEM CACHE)</option>
+                            <option value="sync">SYNC (LEGADO - SEM CACHE)</option>
+                            <option value="loop-cache">LOOP CACHE (BAIXA CONTEÚDO)</option>
+                            <option value="sync-cache">SYNC CACHE (BAIXA CONTEÚDO)</option>
                         </select>
                     </div>
 
@@ -414,6 +418,8 @@
                         <option value="vod">VOD ESTÁTICO (PLAYLIST HLS)</option>
                         <option value="relay-loop">RELAY LOOP (SEM CPU / FILA)</option>
                         <option value="relay-sync">RELAY SYNC (FFMPEG)</option>
+                        <option value="relay-loop-cache">LOOP CACHE (DOWNLOAD LOCAL)</option>
+                        <option value="relay-sync-cache">SYNC CACHE (DOWNLOAD LOCAL)</option>
                     </select>
                 </div>
             </div>
@@ -454,6 +460,6 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
     </button>
 
-    <script src="script.js?v=4.2.0"></script>
+    <script src="script.js?v=4.3.0"></script>
 </body>
 </html>

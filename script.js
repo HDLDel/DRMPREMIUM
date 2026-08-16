@@ -423,6 +423,8 @@ function getChannelType(channel) {
     const status = String(channel.status || '').toLowerCase();
     if (status === 'vod') return 'vod';
     if (String(channel.mode || '').toLowerCase() === 'relay') {
+        if (channel.relaySubtype === 'loop-cache') return 'relay-loop-cache';
+        if (channel.relaySubtype === 'sync-cache') return 'relay-sync-cache';
         return channel.relaySubtype === 'loop' ? 'relay-loop' : 'relay-sync';
     }
     return 'live';
@@ -433,7 +435,9 @@ function getChannelTypeLabel(channel) {
         live: 'LIVE',
         vod: 'VOD',
         'relay-sync': 'RELAY SYNC',
-        'relay-loop': 'RELAY LOOP'
+        'relay-loop': 'RELAY LOOP',
+        'relay-sync-cache': 'SYNC CACHE',
+        'relay-loop-cache': 'LOOP CACHE'
     };
     return labels[getChannelType(channel)] || 'LIVE';
 }
@@ -1311,6 +1315,21 @@ async function startAll() {
             method: 'POST'
         });
         if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const results = Array.isArray(data.results) ? data.results : [];
+            const success = results.filter(item => item.status === 'success');
+            const alreadyRunning = results.filter(item => item.status === 'already-running');
+            const starting = results.filter(item => item.status === 'starting');
+            const failed = results.filter(item => !['success', 'already-running', 'starting'].includes(item.status));
+            const lines = [
+                `Iniciar Todos solicitado: ${starting.length} em preparação, ${success.length} iniciado(s), ${alreadyRunning.length} já ativo(s), ${failed.length} falha(s).`,
+                ''
+            ];
+            success.forEach(item => lines.push(`✓ ${item.name}`));
+            alreadyRunning.forEach(item => lines.push(`• ${item.name}: ${item.message || 'já ativo'}`));
+            starting.forEach(item => lines.push(`↻ ${item.name}: ${item.message}`));
+            failed.forEach(item => lines.push(`✗ ${item.name}: ${item.message || 'não foi iniciado'}`));
+            if (results.length) alert(lines.join('\n'));
             invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
@@ -1329,6 +1348,11 @@ async function stopAll() {
             method: 'POST'
         });
         if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const results = Array.isArray(data.results) ? data.results : [];
+            if (results.length) {
+                alert(`Parar Todos concluído: ${results.length} canal(is) parado(s).\n\n${results.map(item => `✓ ${item.name}`).join('\n')}`);
+            }
             invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
@@ -1464,7 +1488,10 @@ async function openSwitchModeModal(id) {
     if (channel.status === 'vod') {
         currentVal = 'vod';
     } else if (channel.status === 'relay') {
-        currentVal = channel.relaySubtype === 'sync' ? 'relay-sync' : 'relay-loop';
+        currentVal = channel.relaySubtype === 'sync' ? 'relay-sync'
+            : channel.relaySubtype === 'sync-cache' ? 'relay-sync-cache'
+            : channel.relaySubtype === 'loop-cache' ? 'relay-loop-cache'
+            : 'relay-loop';
     } else if (channel.status === 'online') {
         currentVal = 'live';
     }
@@ -1709,12 +1736,24 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAndRenderChannels(searchEl ? searchEl.value : '');
     });
 
-    // Action buttons
-    const btnStartAll = document.getElementById('btn-start-all');
-    if (btnStartAll) btnStartAll.addEventListener('click', startAll);
+    // Action buttons: delegation keeps the controls working even if the
+    // surrounding interface is refreshed or replaced by a render cycle.
+    document.addEventListener('click', (event) => {
+        const startButton = event.target.closest('#btn-start-all');
+        if (startButton) {
+            event.preventDefault();
+            console.log('[UI] Iniciar Todos clicado');
+            startAll();
+            return;
+        }
 
-    const btnStopAll = document.getElementById('btn-stop-all');
-    if (btnStopAll) btnStopAll.addEventListener('click', stopAll);
+        const stopButton = event.target.closest('#btn-stop-all');
+        if (stopButton) {
+            event.preventDefault();
+            console.log('[UI] Parar Todos clicado');
+            stopAll();
+        }
+    });
 
     const btnDownloadM3U = document.getElementById('btn-download-m3u');
     if (btnDownloadM3U) btnDownloadM3U.addEventListener('click', downloadM3U);
