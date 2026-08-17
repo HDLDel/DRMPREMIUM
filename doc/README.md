@@ -7,23 +7,23 @@ monitorar CPU/RAM/disco/rede, acompanhar segurança e exportar playlist M3U.
 
 ## Stack
 
-| Camada | Tecnologia |
-|--------|-----------|
-| Backend | Node.js puro (`http` module), CommonJS |
-| Auth | bcrypt + cookie session (`crypto.randomBytes`) |
-| Vídeo | FFmpeg (HLS, concat, transcode libx264, relay, VOD) |
-| Servidor web | Nginx (proxy reverso + serve de HLS), porta 8081 |
-| Armazenamento | RAM disk `/dev/shm/iptv_canais` (segmentos), JSON (config) |
-| Frontend | HTML/CSS/JS vanilla, tema dark/light com toggle |
-| Produção | PM2 (serviço `24horas`) |
+| Camada       | Tecnologia                                          |
+| ------------ | --------------------------------------------------- |
+| Backend      | Node.js puro (`http` module), CommonJS              |
+| Auth         | bcrypt + cookie session (`crypto.randomBytes`)       |
+| Vídeo        | FFmpeg (HLS, concat, transcode libx264, transmux)   |
+| Servidor web | Nginx (proxy reverso + serve de HLS), porta 8081    |
+| Armazenamento| RAM disk `/dev/shm/iptv_canais` (segmentos), JSON   |
+| Frontend     | HTML/CSS/JS vanilla, tema dark/light com toggle      |
+| Produção     | PM2 (serviço `24horas`)                              |
 
 ## Documentação
 
-| Documento | Público | Conteúdo |
-|-----------|---------|----------|
-| `doc/README.md` | Todos | Visão geral, instalação, deploy e operação |
-| `doc/DEVELOPER.md` | Devs | Arquitetura, API completa e referência do código |
-| `doc/USER_GUIDE.md` | Usuários finais | Manual do dashboard passo a passo |
+| Documento       | Público         | Conteúdo                                  |
+| --------------- | --------------- | ----------------------------------------- |
+| `doc/README.md` | Todos           | Visão geral, instalação, deploy e operação|
+| `doc/DEVELOPER.md` | Devs         | Arquitetura, API completa e referência    |
+| `doc/USER_GUIDE.md` | Usuários finais | Manual do dashboard passo a passo      |
 
 ## Estrutura do projeto
 
@@ -55,20 +55,113 @@ DRMPREMIUM/
 - **Modos de transmissão** (via modal "Alterar Modo" por canal):
   - `live` — pasta local de MP4s (concat) ou HLS pronto.
   - `vod` — VOD estático: converte a pasta para HLS de duração total.
-  - `relay-loop` — fila de URLs externas sondadas via FFprobe; **zero CPU / zero disk**.
-  - `relay-sync` — retransmissão sincronizada via FFmpeg (concat de URLs).
+  - `relay-loop` — URLs externas via transmux on-the-fly (1 FFmpeg leve por viewer).
+  - `relay-sync` — URLs externas com 1 FFmpeg compartilhado por canal.
+  - `relay-loop-cache` — baixa vídeos para o servidor e transmite em loop.
+  - `relay-sync-cache` — igual ao loop-cache, mas sincroniza com a posição original.
   - `offline` — canal desativado.
 - **Dashboard metrics** — CPU real (diferencial), IO, RAM, disco, rede, streams ativos, com badges de tendência (▲/▼/~).
-- **Cache Disco (nocache)** — card clicável que liga/desliga o `nocache` do ffmpeg.
+- **Cache Disco (nocache)** — card clicável que liga/desliga o `nocache` do FFmpeg.
 - **CRUD de canais** — criar, editar, excluir, importar playlist M3U, copiar link M3U por canal.
 - **Controle em massa** — iniciar/parar todos, limpar logs.
 - **Classificação +18** — toggle por canal, filtro no dashboard.
 - **Exportar M3U** — playlist para players IPTV (download ou link).
 - **Watchdog** — monitora atualização HLS a cada 15s e reinicia canal parado (>60s).
-- **Relay Guardian** — revive relay-sync offline a cada 15s.
+- **Relay Guardian** — monitora canais relay offline e tenta reiniciar (com pausa após 5 falhas).
 - **Segurança** (aba P2) — tentativas de login, top IPs suspeitos, bloquear/desbloquear IP (Nginx deny + UFW), acessos aos canais via log do Nginx.
 - **Auto-start** — canais online/relay são reiniciados ao subir o servidor.
 - **Limpeza automática** — logs antigos (>12h), segmentos órfãos do tmpfs (30min).
+
+---
+
+## Tipos de Canal — O que cada um faz e quanto custa
+
+Cada canal tem um modo de transmissão diferente. Entender a diferença entre
+eles ajuda a escolher o certo para cada situação e a evitar surpresas de
+consumo de recursos.
+
+### Tabela Comparativa
+
+| Modo | CPU por canal | RAM por canal | Disco usado | Fonte dos vídeos |
+| ---- | ------------- | ------------- | ----------- | ---------------- |
+| **Ao Vivo** | 1-2% | ~80 MB | Temporário (RAM disk) | Pasta local MP4 |
+| **VOD** | ~0% (após conversão) | ~0% | Fixo (RAM disk) | Pasta local MP4 |
+| **Relay Sync** | 1-2% | ~80 MB | Temporário (RAM disk) | URLs externas |
+| **Relay Loop** | ~0% + 1%/viewer | ~20 MB/viewer | Nenhum | URLs externas |
+| **Loop-Cache** | 1-2% | ~80 MB | Vídeos inteiros no servidor | URLs externas (download) |
+| **Sync-Cache** | 1-2% | ~80 MB | Vídeos inteiros no servidor | URLs externas (download) |
+
+> **Exemplo prático:** Se você tem 10 canais ao vivo, o custo total é
+> aproximadamente **10-20% de CPU** e **800 MB de RAM**. Se forem 10 canais
+> relay-loop com 5 viewers cada, o custo é **~50% de CPU** e **~1 GB de RAM**.
+
+### Como funciona cada modo
+
+#### Ao Vivo (Pasta Local)
+
+Pega uma pasta de vídeos MP4 e transmite em **loop infinito**.
+
+O FFmpeg junta todos os vídeos em sequência (como uma playlist) e gera
+segmentos HLS a cada 15 segundos. Todos os viewers assistem os mesmos
+segmentos — o custo é **fixo por canal**, não por pessoa.
+
+**Quando usar:** quando você tem uma pasta de vídeos e quer transmitir
+24/7 sem interrupção.
+
+#### VOD (Estático)
+
+Converte uma pasta inteira em **um vídeo único muito longo**.
+
+Diferente do Ao Vivo, o VOD não roda em loop — ele gera todos os segmentos
+de uma vez e para. O vídeo fica pronto para assistir do início ao fim.
+
+**Quando usar:** quando você quer disponibilizar um filme ou série que o
+viewer assiste do começo ao fim, sem repetir.
+
+#### Relay Sync (Puro)
+
+**Retransmite URLs externas** com um FFmpeg compartilhado.
+
+O FFmpeg lê as URLs que você configurou e gera HLS para todos os viewers.
+É como o modo Ao Vivo, mas a fonte são links externos em vez de arquivos
+locais.
+
+**Quando usar:** quando você tem links de streaming externos e quer
+retransmitir como se fosse um canal próprio, com vários viewers.
+
+#### Relay Loop (Puro)
+
+**Retransmite URLs externas** sem FFmpeg compartilhado — cada viewer ganha
+seu próprio FFmpeg leve.
+
+Quando alguém abre o canal, o servidor cria um FFmpeg pequeno que copia o
+stream da URL original e envia direto para o viewer. Quando o viewer fecha,
+o FFmpeg morre. Em repouso (nenhum viewer), o custo é **zero**.
+
+**Quando usar:** quando você quer retransmitir URLs externas com o menor
+custo possível, mesmo que cada pessoa tenha seu próprio FFmpeg.
+
+#### Relay Loop-Cache
+
+**Baixa os vídeos para o servidor** e transmite em loop.
+
+O sistema baixa os episódios automaticamente e salva no servidor. O FFmpeg
+transmite o que já foi baixado, e quando termina um episódio, pula para o
+próximo. Enquanto isso, baixa os próximos episódios em background.
+
+**Quando usar:** quando você quer a estabilidade de ter os vídeos no
+servidor, mas sem precisar baixar tudo manualmente antes de começar.
+
+#### Relay Sync-Cache
+
+Igual ao **Loop-Cache**, mas **sincroniza** com a posição original da
+transmissão. Se o canal original está no minuto 30, o seu canal também
+começa no minuto 30.
+
+**Quando usar:** quando você quer acompanhar uma transmissão ao vivo sem
+atraso, mas com a segurança de ter os vídeos baixados.
+
+---
 
 ## Comandos rápidos
 
@@ -101,7 +194,7 @@ Admins definidos em `server.js` (`ADMINS`, hashes bcrypt) e também
 documentados aqui para operação:
 
 | Usuário | Senha |
-|---------|-------|
+| ------- | ----- |
 | `<ADMIN_EMAIL_PLACEHOLDER>` | `<REDACTED_PASSWORD>` |
 | `<ADMIN_USER_PLACEHOLDER>` | `<REDACTED_PASSWORD>` |
 
@@ -116,13 +209,13 @@ os usuários compartilham a mesma sessão. Rotas públicas: `/login.html`,
 ## Requisitos de sistema
 
 | Componente | Versão mínima | Recomendado |
-|------------|--------------|-------------|
-| Ubuntu | 20.04 | 22.04 / 24.04 |
-| Node.js | 18.x | 20.x LTS |
-| FFmpeg | 4.x | 6.x |
-| Nginx | 1.18 | 1.24+ |
-| RAM | 2GB | 4GB+ |
-| Disco | 10GB livres | SSD |
+| ---------- | ------------- | ----------- |
+| Ubuntu     | 20.04         | 22.04 / 24.04 |
+| Node.js    | 18.x          | 20.x LTS   |
+| FFmpeg     | 4.x           | 6.x        |
+| Nginx      | 1.18          | 1.24+      |
+| RAM        | 2GB           | 4GB+       |
+| Disco      | 10GB livres   | SSD        |
 
 ## Instalação rápida
 
@@ -266,9 +359,9 @@ sudo ./update_nginx.sh
 ## Troubleshooting
 
 | Problema | Causa provável | Solução |
-|----------|---------------|---------|
+| -------- | -------------- | ------- |
 | Nginx 502 | Node fora do ar | `pm2 status && pm2 logs 24horas --lines 20` |
-| OOM matou FFmpeg | Falta de RAM | `dmesg | grep -i oom`; reduza `threads` ou aumente RAM |
+| OOM matou FFmpeg | Falta de RAM | `dmesg \| grep -i oom`; reduza `threads` ou aumente RAM |
 | Canal não reinicia | Video corrompido / falta CPU | Watchdog reinicia em ~1min; veja `logs/canal_5.log` |
 | "moov atom not found" | MP4 corrompido | Remova ou reconverta o arquivo |
 | Disco cheio | Logs podem crescer | `du -sh logs/`; limpe via dashboard ("Limpar Logs") |

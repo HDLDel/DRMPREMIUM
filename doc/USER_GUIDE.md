@@ -10,6 +10,8 @@
 Erro: a mensagem "Usuário ou senha inválidos" aparece em vermelho acima
 dos campos.
 
+---
+
 ## Tema claro / escuro
 
 - Botão de **sol/lua** no canto superior direito (masthead) alterna entre
@@ -18,6 +20,8 @@ dos campos.
   próximas visitas (sem piscar na abertura).
 - A tela de login também tem o mesmo botão de tema.
 
+---
+
 ## Dashboard
 
 ### Cards de métricas (topo)
@@ -25,7 +29,7 @@ dos campos.
 Atualizam automaticamente a cada 5 segundos:
 
 | Card | Descrição |
-|------|-----------|
+| ---- | --------- |
 | IO | Carga de I/O do sistema |
 | CPU | % de uso da CPU em tempo real |
 | RAM | % de memória RAM em uso |
@@ -60,7 +64,7 @@ O painel usa duas abas no topo: **P1 Canais** e **P2 Segurança**.
 #### Barra de ferramentas
 
 | Elemento | Função |
-|----------|--------|
+| -------- | ------ |
 | Campo de busca | Filtra por nome ou ID |
 | Filtro Todos / +18 / Livre | Filtra por tipo de conteúdo |
 | Iniciar Todos | Liga todos os canais offline |
@@ -72,7 +76,7 @@ O painel usa duas abas no topo: **P1 Canais** e **P2 Segurança**.
 #### Tabela de canais
 
 | Coluna | Descrição | Ordenável |
-|--------|-----------|-----------|
+| ------ | --------- | --------- |
 | ID | Número identificador | Sim (clique) |
 | Nome | Nome do canal + badge 18+ | Sim |
 | Status | ONLINE (verde), RELAY, VOD ou OFFLINE (vermelho) | Sim |
@@ -93,19 +97,23 @@ O painel usa duas abas no topo: **P1 Canais** e **P2 Segurança**.
 
 > Canais **online** não podem ser editados nem excluídos; pare primeiro.
 
+---
+
 #### Modal "Criar/Editar Canal"
 
 **Modo de Transmissão:**
+
 - **Pasta Local (ao vivo / MP4s)** — escolha a pasta de vídeos (select) ou
   digite um caminho absoluto manual. Se a pasta tiver `index.m3u8`, usa HLS
   pronto; senão concatena os MP4s em loop.
 - **Retransmissão (links externos / relay)** — escolha o tipo:
-  - **FILA DE VÍDEOS (LOOP)** — baixo CPU, zero disco.
-  - **RETRANSMISSÃO SINCRONIZADA (FFMPEG SYNC)**.
+  - **FILA DE VÍDEOS (LOOP)** — retransmite URLs com 1 FFmpeg leve por viewer.
+  - **RETRANSMISSÃO SINCRONIZADA (FFMPEG SYNC)** — retransmite com 1 FFmpeg compartilhado.
   - Opcional: importar links de um `.m3u` salvo no servidor
     (`/home/drmpremium`), ou digitar as URLs (uma por linha).
 
 **Campos extras:**
+
 - **Ativar Transcodificação** — converte para 24fps H.264 (estabilidade,
   consome mais CPU). Recomendado para arquivos com codecs variados.
 - **Conteúdo +18** — marca o canal como adulto.
@@ -115,18 +123,67 @@ O painel usa duas abas no topo: **P1 Canais** e **P2 Segurança**.
 Troca o modo sem recriar o canal:
 
 | Opção | Descrição |
-|-------|-----------|
+| ----- | --------- |
 | DESATIVADO (OFFLINE) | Para e desativa |
 | AO VIVO (PASTA LOCAL) | Transmissão contínua da pasta |
 | VOD ESTÁTICO (PLAYLIST HLS) | Converte a pasta em VOD de duração total |
-| RELAY LOOP (SEM CPU / FILA) | Fila de URLs externas |
-| RELAY SYNC (FFMPEG) | Retransmissão sincronizada de URLs |
+| RELAY LOOP (1 FFmpeg/viewer) | URLs externas via transmux on-the-fly |
+| RELAY SYNC (1 FFmpeg/canal) | URLs externas com FFmpeg compartilhado |
 
 #### Modal de Logs
+
 Visualizador estilo terminal com a saída do FFmpeg, com scroll.
 
 #### Player de Vídeo
+
 Player HLS integrado (hls.js) com botão **Copiar Link**.
+
+---
+
+### Entendendo os modos de transmissão
+
+Ao criar um canal, você escolhe como ele vai transmitir. Cada modo tem um
+custo diferente de CPU, RAM e disco.
+
+#### Tabela de custos por modo
+
+| Modo | CPU | RAM | Disco | Quando usar |
+| ---- | --- | --- | ----- | ----------- |
+| **Ao Vivo** | 1-2% | ~80 MB | Temporário | Pasta de vídeos MP4, loop infinito |
+| **VOD** | ~0% (depois de pronto) | ~0% | Fixo | Filme/série assistido do início ao fim |
+| **Relay Sync** | 1-2% | ~80 MB | Temporário | Links externos, vários viewers |
+| **Relay Loop** | ~0% + 1%/viewer | ~20 MB/viewer | Nenhum | Links externos, poucos viewers |
+| **Loop-Cache** | 1-2% | ~80 MB | Vídeos inteiros | Links externos com estabilidade |
+| **Sync-Cache** | 1-2% | ~80 MB | Vídeos inteiros | Acompanhar transmissão ao vivo |
+
+#### Explicação simples de cada modo
+
+**Ao Vivo (Pasta Local)** — O sistema pega uma pasta de vídeos MP4 e
+transmite em loop infinito. É como colocar uma playlist no YouTube que
+repete para sempre. Cada canal gasta ~1-2% de CPU e ~80 MB de RAM.
+
+**VOD (Estático)** — O sistema converte uma pasta inteira em um vídeo único
+muito longo. É como um filme que você assiste do começo ao fim, sem repetir.
+Depois de pronto, gasta quase zero CPU.
+
+**Relay Sync** — O sistema retransmite links externos usando um FFmpeg
+compartilhado. Todos que assistem veem o mesmo fluxo. Cada canal gasta
+~1-2% de CPU e ~80 MB de RAM.
+
+**Relay Loop** — O sistema retransmite links externos, mas cada pessoa que
+assiste ganha seu próprio FFmpeg leve. É mais econômico quando poucas pessoas
+assistem ao mesmo tempo. Em repouso gasta ~0% de CPU; cada viewer ativo
+gasta ~1% de CPU e ~20 MB de RAM.
+
+**Relay Loop-Cache** — O sistema baixa os vídeos automaticamente para o
+servidor e transmite em loop. É mais estável que o Loop puro, mas gasta
+disco para salvar os vídeos. Cada canal gasta ~1-2% de CPU e ~80 MB de RAM.
+
+**Relay Sync-Cache** — Igual ao Loop-Cache, mas sincroniza com a posição
+original da transmissão. Se o canal original está no minuto 30, o seu
+canal também começa no minuto 30.
+
+---
 
 ### P2 — Segurança
 
@@ -150,21 +207,26 @@ Quatro seções para monitorar acesso ao painel:
 
 Use o link `http://<IP>:8081/playlist.m3u` (ou exporte pelo botão no
 dashboard) em players como:
+
 - **VLC** — Mídia > Abrir fluxo de rede.
 - **TiviMate** — Adicionar playlist.
 - **IPTV Smarters** — URL da playlist.
 - **Kodi** — Add-on PVR IPTV Simple Client.
 
+---
+
 ## Troubleshooting
 
 | Problema | Causa possível | Solução |
-|----------|---------------|---------|
+| -------- | -------------- | ------- |
 | Login não funciona | Credenciais erradas | Verifique com o admin |
 | Canal não inicia | Pasta sem vídeos válidos | Verifique se há MP4s não corrompidos |
 | Canal trava sozinho | Vídeo corrompido ou falta CPU | Watchdog reinicia em ~1min |
 | Log mostra "moov atom not found" | MP4 corrompido | Remova ou reconverta o arquivo |
 | Stream não abre | Canal offline ou Nginx parado | Verifique status do canal e Nginx |
 | IP bloqueado por engano | Tentativas falhas em massa | Desbloqueie na aba Segurança |
+
+---
 
 ## Atalhos e comportamentos
 

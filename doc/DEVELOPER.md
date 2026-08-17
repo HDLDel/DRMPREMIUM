@@ -2,8 +2,8 @@
 
 Arquitetura, API e referência do código do Painel 24 Horas.
 
-Tamanhos atuais: `server.js` ~2461 linhas, `script.js` ~1289 linhas,
-`login.js` 69 linhas, `index.html` 425 linhas, `style.css` ~1586 linhas.
+Tamanhos atuais: `server.js` ~3580 linhas, `script.js` ~1852 linhas,
+`login.js` 73 linhas, `index.html` 465 linhas, `style.css` ~1839 linhas.
 
 ---
 
@@ -37,6 +37,7 @@ Nginx (porta 8081)
 ## Fluxo de dados
 
 ### Criação de canal (live)
+
 1. Usuário preenche modal (modo PASTA LOCAL ou RELAY).
 2. `script.js` → `POST /api/createchannel` → `server.js`.
 3. Modo `live`: escaneia a pasta fonte; se houver `index.m3u8` usa HLS
@@ -48,6 +49,7 @@ Nginx (porta 8081)
 5. Salva em `channels.json` e retorna o canal.
 
 ### Início de transmissão (`startChannel`)
+
 1. Cria/limpa `outputDir` no RAM disk (remove `.ts`, `.m3u8`, `.tmp`).
 2. Se concat (não-relay): re-gera `playlist.txt` na RAM a partir da pasta.
 3. Sonda URLs via FFprobe para relay-loop (`relayUrlProbed`/`relayUrlDurations`).
@@ -56,6 +58,7 @@ Nginx (porta 8081)
 6. Registra em `activeStreams` (Map), marca canal `online`/`relay`.
 
 ### Watchdog (a cada 15s)
+
 - Para cada stream ativo: se `index.m3u8` sem atualização há **>60s**,
   registra no log, salva posição estimada do playlist, `SIGKILL`,
   remove de `activeStreams` e reinicia após 2s.
@@ -63,19 +66,23 @@ Nginx (porta 8081)
   offline; offline é reiniciado após 2s.
 
 ### Limpeza (intervalos)
+
 - Logs antigos: a cada 12h remove `logs/*.log` com mtime > 12h.
 - tmpfs: a cada 30min remove segmentos órfãos.
+
+---
 
 ## Decisões técnicas
 
 ### RAM disk para segmentos HLS
+
 - Path: `/dev/shm/iptv_canais/`. Evita desgaste do SSD com escritas
   constantes de segmentos `.ts`. Tradeoff: limitado à RAM disponível.
 
 ### Modos de saída: Transcode vs Copy
 
 | Modo | Flag | Uso CPU | Estabilidade | Uso recomendado |
-|------|------|---------|-------------|-----------------|
+| ---- | ---- | ------- | ------------ | --------------- |
 | Copy | `useTranscode=false` | Baixo | Média | Vídeos com codecs homogêneos |
 | Transcode | `useTranscode=true` | Alto | Alta | Vídeos com codecs/FPS variados |
 
@@ -83,23 +90,28 @@ Transcode usa libx264, 24fps, CRF 28, 1 thread, `ultrafast` — prioriza
 estabilidade sobre qualidade.
 
 ### Por que Node.js puro (sem frameworks)
+
 Zero dependências além do `bcryptjs`; ideal para recursos limitados;
 arquivo único facilita deploy e debug.
 
 ### Autenticação via sessão estática
+
 - `SESSION_ID` gerado no startup via `crypto.randomBytes(32)`.
 - Cookie `session_token` (HttpOnly, SameSite=Lax) válido até reiniciar.
 - Todos os usuários compartilham a mesma sessão.
 - Admins hardcoded com hashes bcrypt em `ADMINS`.
 
 ### nocache
+
 - Binário `/usr/bin/nocache` (se presente) prefixa o FFmpeg para evitar
   cache de disco. Estado persistido no flag `.nocache` (na pasta do app).
+
+---
 
 ## Convenções de código
 
 | Aspecto | Convenção |
-|---------|-----------|
+| ------- | --------- |
 | Backend | Node.js puro, CommonJS (`require`) |
 | Frontend | HTML/CSS/JS vanilla |
 | Polling | Stats 5s, canais 10s |
@@ -122,14 +134,17 @@ Base URL: `http://<host>:8080` (Node direto) ou `http://<host>:8081`
 ## Autenticação
 
 ### POST /api/login
+
 ```json
 {"user": "<ADMIN_USER_PLACEHOLDER>", "pass": "<REDACTED_PASSWORD>"}
 ```
+
 **200:** `{"status":"success"}` — define cookie `session_token`.
 **401:** `{"status":"error"}`. Cada tentativa é registrada em
 `loginAttempts` (ip, user, success, userAgent, timestamp; máx. 500).
 
 ### POST /api/logout
+
 **200:** `{"status":"logged_out"}` — remove a sessão.
 
 ---
@@ -137,6 +152,7 @@ Base URL: `http://<host>:8080` (Node direto) ou `http://<host>:8081`
 ## Sistema / Status
 
 ### GET /api/status
+
 ```json
 {
   "cpu": 45, "io": 12, "ram": 67, "disco": 34, "rede": "2.45",
@@ -146,8 +162,9 @@ Base URL: `http://<host>:8080` (Node direto) ou `http://<host>:8081`
   "disks": [{"filesystem": "/dev/sda1", "size": "100G", "used": "40G", "avail": "60G", "usePercent": "40%", "mounted": "/"}]
 }
 ```
+
 | Campo | Descrição |
-|-------|-----------|
+| ----- | --------- |
 | cpu | % CPU real (diferencial, estilo htop) |
 | io | Load avg escalado pelo nº de cores |
 | ram | % RAM em uso |
@@ -163,7 +180,9 @@ Base URL: `http://<host>:8080` (Node direto) ou `http://<host>:8081`
 ## Canais
 
 ### GET /api/channels
+
 Lista canais com uptime calculado:
+
 ```json
 [{"id": 1, "name": "teste", "status": "relay", "mode": "relay",
   "relaySubtype": "sync", "is18": false, "useTranscode": false,
@@ -172,11 +191,13 @@ Lista canais com uptime calculado:
 ```
 
 ### POST /api/createchannel
+
 ```json
 {"channelName": "Meu Canal", "sourceFolderName": "Filmes_Acao",
  "useTranscode": false, "is18": false, "mode": "live",
  "sourceUrl": "", "relaySubtype": null, "relayUrls": []}
 ```
+
 - `mode: "live"` → usa `sourceFolderName` (subpasta de `24HORAS/`, caminho
   absoluto, ou `"."` para a raiz). Detecta HLS pronto (`index.m3u8`) ou gera
   playlist de MP4s.
@@ -186,24 +207,31 @@ Lista canais com uptime calculado:
 - **400:** caminho não existe; nenhum vídeo válido; sem URLs de relay.
 
 ### POST /api/updatechannel
-Edita canal (deve estar parado).
+
+Edita canal (deve estar parado):
+
 ```json
 {"id": 5, "channelName": "Novo Nome", "sourceFolderName": "OutraPasta",
  "useTranscode": true, "is18": true}
 ```
+
 **400** se o canal estiver rodando: `"Pare o canal antes de editá-lo."`
 
 ### POST /api/delete
+
 ```json
 {"id": 5}
 ```
+
 **200:** `{"status":"deleted"}`. Remove registro, RAM disk e log do canal
 (após delay). Exige canal parado.
 
 ### POST /api/toggle18
+
 ```json
 {"id": 1}
 ```
+
 **200:** `{"status":"success","is18":true}`
 
 ---
@@ -211,26 +239,34 @@ Edita canal (deve estar parado).
 ## Controle de transmissão
 
 ### POST /api/start
+
 ```json
 {"id": 1}
 ```
+
 **200:** `{"status":"success","pid":12345}` · **400:** "Canal já rodando"
 
 ### POST /api/stop
+
 ```json
 {"id": 1}
 ```
+
 **200:** `{"status":"stopped"}` (SIGKILL)
 
 ### POST /api/startall / /api/stopall
+
 **200:** `{"status":"success","started":["..."]}` /
 `{"status":"success","stopped":["..."]}`
 
 ### POST /api/switch-mode
+
 Troca o modo sem recriar o canal:
+
 ```json
 {"id": 1, "newMode": "offline" | "live" | "vod" | "relay-loop" | "relay-sync"}
 ```
+
 - `offline`: para e marca offline.
 - `vod`: converte pasta para HLS VOD em `/home/drmpremium/hls_pronto/{id}/`
   (reconverte se não existir) e marca `status: 'vod'`.
@@ -239,21 +275,28 @@ Troca o modo sem recriar o canal:
 - **400:** playlist não encontrada para VOD; canal sem URLs; modo inválido.
 
 ### POST /api/toggle-vod
+
 Alterna VOD ↔ live sem reconverter (usa flag `.vod_{id}`):
+
 ```json
 {"id": 1}
 ```
+
 **200:** `{"status":"success","mode":"vod"|"live", ...}`
 
 ### POST /api/convert
+
 Converte canal para VOD estático em `/home/drmpremium/hls_pronto/{id}/`
 (se já existir `index.m3u8`, só ativa o modo).
 
 ### POST /api/relay-advance
+
 Avança manualmente o índice de um relay-loop:
+
 ```json
 {"id": 1}
 ```
+
 **200:** `{"status":"success","currentIndex":2}`
 
 ---
@@ -261,31 +304,40 @@ Avança manualmente o índice de um relay-loop:
 ## Logs e utilitários
 
 ### GET /api/videosources
-Lista pastas de vídeo disponíveis dentro de `24HORAS/`
+
+Lista pastas de vídeo disponíveis dentro de `24HORAS/`:
+
 ```json
 [".", "Filmes_Acao", "Series", "Filmes_Acao/Subpasta"]
 ```
 
 ### GET /api/logs?id={id}
+
 Últimos 5KB do log FFmpeg do canal. **200** `text/plain`.
 
 ### POST /api/clear-logs
+
 Esvazia todos os `logs/*.log`. **200:** `{"status":"success","count":N}`
 
 ### GET /api/relay-m3u-files
-Lista arquivos `.m3u`/`.m3u8` em `/home/drmpremium/`.
+
+Lista arquivos `.m3u`/`.m3u8` em `/home/drmpremium/`:
+
 ```json
 ["canais.m3u", "lista.m3u8"]
 ```
 
 ### GET /api/read-m3u?file={nome}
+
 Extrai URLs http/https de um `.m3u` (usa `path.basename` — sem path
 traversal). **200:** `{"urls":["http://..."]}` · **404:** arquivo não existe.
 
 ### GET /api/nocache-status
+
 **200:** `{"nocache": true|false}`
 
 ### POST /api/toggle-nocache
+
 Inverte o flag `.nocache` (cria/remove). **200:** `{"nocache":true}`
 
 ---
@@ -293,39 +345,49 @@ Inverte o flag `.nocache` (cria/remove). **200:** `{"nocache":true}`
 ## Segurança (aba P2)
 
 ### GET /api/login-attempts
+
 Últimas 200 tentativas:
+
 ```json
 [{"ip": "1.0.0.1", "user": "admin", "success": false,
   "userAgent": "curl/8.0", "timestamp": "2026-01-01T00:00:00.000Z"}]
 ```
 
 ### GET /api/top-attackers
+
 IPs agregados por total de tentativas (ordem decrescente):
+
 ```json
 [{"ip": "1.0.0.1", "total": 50, "fails": 48, "successes": 2, "lastAttempt": "..."}]
 ```
 
 ### GET /api/blocked-ips
+
 ```json
 ["1.0.0.1", "1.0.0.1"]
 ```
 
 ### POST /api/block-ip / /api/unblock-ip
+
 ```json
 {"ip": "1.0.0.1"}
 ```
+
 Persiste em `/etc/nginx/blocked_ips.json`, gera `/etc/nginx/blocked_ips.conf`
 (`deny <ip>;`), reload do Nginx e aplica `ufw deny from <ip>`.
 **200:** `{"status":"success","ip":"1.0.0.1"}`
 
 ### GET /api/nginx-access
+
 Agregados do `/var/log/nginx/iptv_access.log`:
+
 ```json
 [{"ip": "1.0.0.1", "totalHits": 100, "firstSeen": "...", "lastSeen": "...",
   "channels": [{"id": 1, "hits": 90, "lastAccess": "..."}]}]
 ```
 
 ### GET /api/nginx-access/stats
+
 Resumo: `{"totalIPs": 10, "totalRequests": 500, "topChannels": [{"id":1,"hits":300}]}`
 
 ---
@@ -333,10 +395,12 @@ Resumo: `{"totalIPs": 10, "totalRequests": 500, "topChannels": [{"id":1,"hits":3
 ## Público
 
 ### GET /playlist.m3u
+
 Gera playlist M3U com todos os canais (`http://host/canais/{id}/index.m3u8`),
 `Content-Disposition: attachment`.
 
 ### GET /canais/{id}/{arquivo}
+
 Handler de relay/live/VOD: relay-loop serve playlist dinâmica de URLs;
 live/VOD servem do filesystem/RAM disk.
 
@@ -344,12 +408,12 @@ live/VOD servem do filesystem/RAM disk.
 
 # 3. Referência do código
 
-## server.js (Node, ~2461 linhas)
+## server.js (Node, ~3580 linhas)
 
 ### Constantes globais
 
 | Constante | Valor | Descrição |
-|-----------|-------|-----------|
+| --------- | ----- | --------- |
 | `PORT` | 8080 | Porta do servidor HTTP |
 | `CHANNELS_DIR` | `/dev/shm/iptv_canais` | RAM disk para HLS |
 | `VIDEO_SOURCE` | `path.join(__dirname, '24HORAS')` | Pasta raiz de vídeos |
@@ -362,12 +426,15 @@ live/VOD servem do filesystem/RAM disk.
 | `ADMINS` | `[{user, hash}]` | Credenciais bcrypt hardcoded |
 | `BLOCKED_IPS_FILE` | `/etc/nginx/blocked_ips.json` | IPs bloqueados |
 
-### Variaveis globais
+### Variáveis globais
 
 | Variável | Tipo | Descrição |
-|----------|------|-----------|
+| -------- | ---- | --------- |
 | `channels` | `Array<Channel>` | Configurações dos canais (JSON) |
 | `activeStreams` | `Map<number,{process,startedAt}>` | FFmpeg ativos |
+| `relayTransmuxProcs` | `Map<number,ChildProcess[]>` | FFmpeg transmux on-the-fly por canal |
+| `relayCacheState` | `Map<number,{active:boolean,errors:number}>` | Estado do cache de relay |
+| `relayCacheProcs` | `Map<number,ChildProcess>` | FFmpeg de relay-cache por canal |
 | `loginAttempts` | `Array` | Registro de tentativas (máx. 500) |
 | `blockedIPs` | `Set<string>` | IPs bloqueados |
 | `nginxAccessData` | `Map<ip,{channels,totalHits,...}>` | Acessos via log Nginx |
@@ -376,26 +443,34 @@ live/VOD servem do filesystem/RAM disk.
 
 ### Funções principais
 
-- `getCpuTimes()` / `getRealCpuUsage()` — CPU diferencial estilo htop.
-- `getCookies(req)` — parse do header Cookie.
-- `loadChannels()` / `saveChannels()` — I/O do `channels.json`.
-- `getDirectoriesRecursive(base, root)` — lista subpastas (usa realpath).
-- `getFilesRecursive(dir, extension)` — lista arquivos, filtra 0 bytes.
-- `isVideoValid(filePath)` — `ffprobe -v error ...`; true se exit 0.
-- `getDiskUsage()` — `df / --output=pcent`.
-- `getNetworkUsage()` — `/proc/net/dev`, diferencial em Mbps.
-- `getDiskSpaceDetails()` / `getDiskSpaceDetailsCached()` — cache 60s.
-- `getSystemStats()` — agrega tudo para `/api/status` (inclui `nocache`).
-- `startChannel(id)` — fluxo completo de início (validação, preparação,
-  playlist, args FFmpeg, spawn, logging, eventos, registro).
-- `recordLoginAttempt(ip, user, success, userAgent)` — segurança.
-- `loadBlockedIPs()` / `saveBlockedIPs()` — IPs + geração do `blocked_ips.conf`.
-- `parseNginxAccessLog()` — lê o access log do Nginx em streaming.
-- `probeUrlDuration(url)` — FFprobe de URL externa para relay-loop.
-- `scheduleRelayLoop(channel)` / `advanceRelayLoop(...)` — fila do relay.
-- `getRelayFlagPaths` / `hasRelayFlag` / `setRelayFlag` — flags `.relay_{id}`.
-- `getVodFlagPaths` / flags `.vod_{id}`.
-- `estimateFileIndex(id, totalFiles)` — posição aproximada no playlist.
+| Função | Descrição |
+| ------ | --------- |
+| `getCpuTimes()` / `getRealCpuUsage()` | CPU diferencial estilo htop |
+| `getCookies(req)` | Parse do header Cookie |
+| `loadChannels()` / `saveChannels()` | I/O do `channels.json` |
+| `getDirectoriesRecursive(base, root)` | Lista subpastas (usa realpath) |
+| `getFilesRecursive(dir, extension)` | Lista arquivos, filtra 0 bytes |
+| `isVideoValid(filePath)` | `ffprobe -v error ...`; true se exit 0 |
+| `getDiskUsage()` | `df / --output=pcent` |
+| `getNetworkUsage()` | `/proc/net/dev`, diferencial em Mbps |
+| `getDiskSpaceDetails()` / `getDiskSpaceDetailsCached()` | Cache 60s |
+| `getSystemStats()` | Agrega tudo para `/api/status` (inclui `nocache`, `ffmpegCount`) |
+| `countFfmpegProcesses()` | Conta processos FFmpeg ativos no sistema |
+| `startChannel(id)` | Fluxo completo de início |
+| `startRelayLoop(channel)` | Relay loop puro: playlist virtual + transmux on-the-fly |
+| `startRelayCached(channel)` | Relay cache: download + transmissão compartilhada |
+| `handleRelayLoopFailure(channelId, req, res, startTime, err)` | Resposta 502 graceful |
+| `recordLoginAttempt(ip, user, success, userAgent)` | Segurança |
+| `loadBlockedIPs()` / `saveBlockedIPs()` | IPs + geração do `blocked_ips.conf` |
+| `parseNginxAccessLog()` | Lê o access log do Nginx em streaming |
+| `probeUrlDuration(url)` | FFprobe de URL externa para relay-loop |
+| `scheduleRelayLoop(channel)` / `advanceRelayLoop(...)` | Fila do relay |
+| `getRelayFlagPaths` / `hasRelayFlag` / `setRelayFlag` | Flags `.relay_{id}` |
+| `getVodFlagPaths` / flags `.vod_{id}` | Flags VOD |
+| `estimateFileIndex(id, totalFiles)` | Posição aproximada no playlist |
+| `trackRelayTransmux(id, proc)` / `killRelayTransmuxProcs(id)` | Gerencia transmux on-the-fly |
+| `sweepDeadRelayTransmuxProcs()` | Limpeza periódica de processos mortos |
+| `clearRelayLoopState(id)` | Mata transmux + limpa state do relay-loop |
 
 ### Roteamento (30 rotas + estático)
 
@@ -406,20 +481,98 @@ Páginas não autenticadas recebem 302 → `/login.html`.
 ### Watchdog e limpezas
 
 - `setInterval(15000)`: watchdog de `index.m3u8` (60s de tolerância) +
-  Relay Guardian para relay-sync.
+  Relay Guardian para relay-sync (com pausa após 5 falhas consecutivas).
+- `setInterval(5min)`: sweep de processos transmux mortos (`sweepDeadRelayTransmuxProcs`).
 - `setInterval(12h)`: remove logs com mtime > 12h.
 - `setInterval(30min)`: limpa segmentos órfãos do tmpfs.
 
-## script.js (frontend, ~1289 linhas)
+---
+
+## Tipos de Canal — Visão técnica
+
+### Modos de transmissão
+
+| Modo | `mode` | `relaySubtype` | FFmpeg por canal | CPU por canal | RAM por canal |
+| ---- | ------ | -------------- | ---------------- | ------------- | ------------- |
+| Ao Vivo | `live` | — | 1 (compartilhado) | 1-2% (copy) / 30-40% (transcode) | ~80 MB |
+| VOD | `vod` | — | 1 (compartilhado) | 30-40% (conversão), depois ~0% | ~80 MB |
+| Relay Sync | `relay` | `sync` | 1 (compartilhado) | 1-2% | ~80 MB |
+| Relay Loop | `relay` | `loop` | 1 por viewer (transmux) | ~0% repouso, ~1%/viewer | ~20 MB/viewer |
+| Relay Loop-Cache | `relay` | `loop-cache` | 1 (compartilhado) | 1-2% | ~80 MB |
+| Relay Sync-Cache | `relay` | `sync-cache` | 1 (compartilhado) | 1-2% | ~80 MB |
+| Offline | `offline` | — | 0 | 0% | 0 MB |
+
+### Fluxo de dados por modo
+
+**Ao Vivo (`live`):**
+`24HORAS/{pasta}/*.mp4` → playlist concat → FFmpeg concat demuxer → segmentos HLS → `/dev/shm/iptv_canais/{id}/`
+
+**VOD (`vod`):**
+`24HORAS/{pasta}/*.mp4` → playlist concat → FFmpeg concat demuxer → segmentos HLS fixos → `/dev/shm/iptv_canais/{id}/`
+
+**Relay Sync (`relay` + `sync`):**
+`relayUrls[]` → FFmpeg compartilhado → playlist concatenada → segmentos HLS → `/dev/shm/iptv_canais/{id}/`
+
+**Relay Loop (`relay` + `loop`):**
+`relayUrls[]` → playlist virtual `#EXT-X-DISCONTINUITY` → 1 transmux FFmpeg por viewer (`ffmpeg -i url -c copy -f mpegts pipe:1`) → stream direto ao viewer
+
+**Relay Loop-Cache (`relay` + `loop-cache`):**
+`relayUrls[]` → download `yt-dlp` → `24HORAS/{pasta}/` → FFmpeg compartilhado → segmentos HLS → `/dev/shm/iptv_canais/{id}/`
+
+**Relay Sync-Cache (`relay` + `sync-cache`):**
+Igual ao Loop-Cache, mas sincroniza com a posição original da transmissão.
+
+### especoficidades por modo
+
+**Ao Vivo (Pasta Local)** — O sistema pega uma pasta de vídeos MP4 e
+transmite em loop infinito. É como colocar uma playlist no YouTube que
+repete para sempre. Cada canal gasta ~1-2% de CPU e ~80 MB de RAM.
+
+**VOD (Estático)** — O sistema converte uma pasta inteira em um vídeo único
+muito longo. É como um filme que você assiste do começo ao fim, sem repetir.
+Depois de pronto, gasta quase zero CPU.
+
+**Relay Sync** — O sistema retransmite links externos usando um FFmpeg
+compartilhado. Todos que assistem veem o mesmo fluxo. Cada canal gasta
+~1-2% de CPU e ~80 MB de RAM.
+
+**Relay Loop** — O sistema retransmite links externos, mas cada pessoa que
+assiste ganha seu próprio FFmpeg leve. É mais econômico quando poucas pessoas
+assistem ao mesmo tempo. Em repouso gasta ~0% de CPU; cada viewer ativo
+gasta ~1% de CPU e ~20 MB de RAM.
+
+**Relay Loop-Cache** — O sistema baixa os vídeos automaticamente para o
+servidor e transmite em loop. É mais estável que o Loop puro, mas gasta
+disco para salvar os vídeos. Cada canal gasta ~1-2% de CPU e ~80 MB de RAM.
+
+**Relay Sync-Cache** — Igual ao Loop-Cache, mas sincroniza com a posição
+original da transmissão. Se o canal original está no minuto 30, o seu
+canal também começa no minuto 30.
+
+### Armazenamento por modo
+
+| Modo | Segmentos HLS | Vídeos fonte | Logs |
+| ---- | ------------- | ------------ | ---- |
+| Ao Vivo | RAM disk (temporário, 15s) | `24HORAS/{pasta}/` | `logs/canal_{id}.log` |
+| VOD | RAM disk (fixos, duração total) | `24HORAS/{pasta}/` | `logs/canal_{id}.log` |
+| Relay Sync | RAM disk (temporário) | Nenhum | `logs/canal_{id}.log` |
+| Relay Loop | Nenhum | Nenhum | `logs/relay_{id}.log` |
+| Relay Loop-Cache | RAM disk (temporário) | `24HORAS/{pasta}/` (downloads) | `logs/canal_{id}.log` |
+| Relay Sync-Cache | RAM disk (temporário) | `24HORAS/{pasta}/` (downloads) | `logs/canal_{id}.log` |
+
+---
+
+## script.js (frontend, ~1852 linhas)
 
 ### Variáveis globais
+
 `allChannels`, `currentSortColumn`/`currentSortDirection`,
 `editingChannelId`, `isManualSource`, `trendHistory`.
 
 ### Funções
 
 | Função | Descrição |
-|--------|-----------|
+| ------ | --------- |
 | `svgIcon(name, size)` | Ícones SVG (ICON_PATHS) |
 | `updateStats()` | `/api/status` a cada 5s + `updateTrends()` |
 | `updateTrends(metrics)` | Badges ▲/▼/~ com histórico em `trendHistory` |
@@ -449,17 +602,22 @@ Páginas não autenticadas recebem 302 → `/login.html`.
 | `openPlayerModal(id, name)` / `closePlayerModal()` / `copyCurrentPlayerUrl()` | Player HLS (hls.js) |
 
 ### Intervalos
+
 - `5000ms` → `updateStats()`
 - `10000ms` → `loadAndRenderChannels()`
 
-## login.js (69 linhas)
+---
+
+## login.js (73 linhas)
+
 - IIFE aplica tema antes do render (sem FOUC): `localStorage['drm-theme']`
   → fallback `prefers-color-scheme`.
 - `toggleTheme()` — inverte tema e persiste.
 - `doLogin()` — POST `/api/login`; erro mostra `#error-msg.visible`.
 - Enter no campo de senha dispara login.
 
-## index.html (425 linhas)
+## index.html (465 linhas)
+
 - Masthead: título + relógio + `.btn-theme` + `Sair`.
 - 7 cards KPI: IO, CPU, RAM, Disco, Rede, Streams (+ `#cache-card`
   clicável) — cada um com `.trend`/`#trend-*`.
@@ -468,7 +626,8 @@ Páginas não autenticadas recebem 302 → `/login.html`.
 - Modais: criar/editar canal (modo live/relay + M3U import), alterar modo,
   logs, player HLS.
 
-## style.css (~1586 linhas)
+## style.css (~1839 linhas)
+
 - Dois temas via `:root` (dark) e `:root[data-theme="light"]`.
 - Tokens dark: `--bg #0B0F19`, `--surface #131927`, `--surface-2 #161F30`,
   `--border #1E293B`, `--text #F8FAFC`, `--muted #94A3B8`,
@@ -509,14 +668,14 @@ Páginas não autenticadas recebem 302 → `/login.html`.
 ```
 
 | Campo | Tipo | Descrição |
-|-------|------|-----------|
+| ----- | ---- | --------- |
 | `id` | number | Único; reutiliza IDs de canais excluídos |
 | `name` | string | Nome exibido no dashboard e M3U |
 | `sourceFolder` | string | Relativo a `24HORAS/` ou caminho absoluto (live) |
 | `sourceUrl` | string | URL única de origem (relay single) |
 | `relayUrls` | string[] | Lista de URLs de retransmissão |
 | `mode` | string | `live` \| `relay` \| `vod` \| `offline` |
-| `relaySubtype` | string? | `sync` \| `loop` (apenas relay) |
+| `relaySubtype` | string? | `sync` \| `loop` \| `loop-cache` \| `sync-cache` (apenas relay) |
 | `currentUrlIndex` | number | Posição atual no relay-loop |
 | `playlistFilePath` | string | Playlist gerada (concat) ou HLS pronto |
 | `inputType` | string | `concat` \| `hls` \| `relay` |
@@ -551,6 +710,8 @@ server {
 Histórico: em versões antigas o Nginx servia `/canais/` direto do RAM disk
 via `alias`; hoje **tudo** passa pelo Node.js, que decide entre relay
 dinâmico, live e VOD.
+
+---
 
 ## Arquivos de apoio
 
