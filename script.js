@@ -44,6 +44,15 @@ function svgIcon(name, size = 15) {
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
+// SVGs pré-gerados para os botões de ação (evita recriar strings a cada render)
+const SVG_PLAY = svgIcon('play');
+const SVG_STOP = svgIcon('stop');
+const SVG_NEXT = svgIcon('next');
+const SVG_LINK = svgIcon('link');
+const SVG_EDIT = svgIcon('edit');
+const SVG_LOGS = svgIcon('logs');
+const SVG_TRASH = svgIcon('trash');
+
 // Escapa HTML para evitar XSS em dados vindos do servidor
 function escapeHtml(str) {
     if (typeof str !== 'string' && typeof str !== 'number') return '';
@@ -626,25 +635,25 @@ function buildChannelActions(channel) {
     const preparing = Boolean(channel.preparation && channel.preparation.phase !== 'error');
     
     if (!online && !preparing) {
-        actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${svgIcon('play')}</button>`;
+        actionBtns += `<button class="btn-primary btn-icon" data-action="start" data-id="${channel.id}" title="Iniciar">${SVG_PLAY}</button>`;
     } else {
-        actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${svgIcon('stop')}</button>`;
+        actionBtns += `<button class="btn-stop btn-icon" data-action="stop" data-id="${channel.id}" title="Parar">${SVG_STOP}</button>`;
     }
     
     if (channel.status === 'relay' && channel.relaySubtype === 'loop') {
-        actionBtns += `<button class="btn-edit btn-icon" data-action="advanceRelay" data-id="${channel.id}" title="Próximo Vídeo">${svgIcon('next')}</button>`;
+        actionBtns += `<button class="btn-edit btn-icon" data-action="advanceRelay" data-id="${channel.id}" title="Próximo Vídeo">${SVG_NEXT}</button>`;
     }
     
-    actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${svgIcon('link')}</button>`;
+    actionBtns += `<button class="btn-cyan btn-icon" data-action="copyChannelM3U" data-id="${channel.id}" title="Copiar Link M3U">${SVG_LINK}</button>`;
 
     if (online) {
-        actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${svgIcon('play')} ASSISTIR</button>`;
+        actionBtns += `<button class="btn-blue btn-icon" data-action="openPlayerModal" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Assistir no Pop-up">${SVG_PLAY} ASSISTIR</button>`;
     }
     
     actionBtns += " " +
-        `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${svgIcon('edit')}</button> ` +
-        `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${svgIcon('logs')}</button> ` +
-        `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${online || preparing ? 'relay' : 'offline'}" title="Excluir">${svgIcon('trash')}</button>`;
+        `<button class="btn-edit btn-icon" data-action="showEditChannelModal" data-id="${channel.id}" title="Editar">${SVG_EDIT}</button> ` +
+        `<button class="btn-neutral btn-icon" data-action="viewLogs" data-id="${channel.id}" data-name="${escapeHtml(channel.name)}" title="Logs">${SVG_LOGS}</button> ` +
+        `<button class="btn-stop btn-icon" data-action="deleteChannel" data-id="${channel.id}" data-status="${online || preparing ? 'relay' : 'offline'}" title="Excluir">${SVG_TRASH}</button>`;
     
     return `<div class="action-bar">${actionBtns}</div>`;
 }
@@ -1025,24 +1034,31 @@ async function loadLoginAttempts() {
             validTimestamps.add(timestamp);
             
             const existingRow = existingRows.get(timestamp);
-            const newRowHtml = `
-                <tr data-timestamp="${timestamp}" class="${a.success ? '' : 'row-fail'}">
-                    <td><code>${escapeHtml(a.ip)}</code></td>
-                    <td>${escapeHtml(a.user)}</td>
-                    <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
-                    <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
-                    <td>
-                        <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
-                    </td>
-                </tr>
-            `;
-            
             if (existingRow) {
-                // Atualizar só se mudou (não sobrescrever row-fail vazio)
-                if (existingRow.outerHTML !== newRowHtml.trim()) {
-                    existingRow.outerHTML = newRowHtml;
+                // Atualizar só se mudou (comparar atributos data, não outerHTML)
+                const newClass = a.success ? '' : 'row-fail';
+                if (existingRow.className !== newClass) {
+                    existingRow.className = newClass;
+                }
+                const statusCell = existingRow.cells[3];
+                if (statusCell) {
+                    const newStatusHtml = a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>';
+                    if (statusCell.innerHTML !== newStatusHtml) {
+                        statusCell.innerHTML = newStatusHtml;
+                    }
                 }
             } else {
+                const newRowHtml = `
+                    <tr data-timestamp="${timestamp}" class="${a.success ? '' : 'row-fail'}">
+                        <td><code>${escapeHtml(a.ip)}</code></td>
+                        <td>${escapeHtml(a.user)}</td>
+                        <td>${new Date(a.timestamp).toLocaleString('pt-BR')}</td>
+                        <td>${a.success ? '<span class="stat-ok">OK</span>' : '<span class="stat-fail">FALHA</span>'}</td>
+                        <td>
+                            <button class="btn-danger btn-small" data-action="blockIP" data-ip="${escapeHtml(a.ip)}">BLOQUEAR</button>
+                        </td>
+                    </tr>
+                `;
                 tbody.insertAdjacentHTML('beforeend', newRowHtml);
             }
         });
@@ -1089,7 +1105,7 @@ async function loadBlockedIPs() {
         const emptyRow = tbody.querySelector('tr.empty-row');
         if (emptyRow && ips.length > 0) emptyRow.remove();
         
-        // Diff/Patch por IP
+        // Diff/Patch por IP (sem outerHTML)
         const existingRows = new Map();
         tbody.querySelectorAll('tr[data-ip]').forEach(row => {
             existingRows.set(row.dataset.ip, row);
@@ -1099,21 +1115,15 @@ async function loadBlockedIPs() {
         ips.forEach(ip => {
             validIps.add(ip);
             
-            const existingRow = existingRows.get(ip);
-            const newRowHtml = `
-                <tr data-ip="${escapeHtml(ip)}">
-                    <td><code>${escapeHtml(ip)}</code></td>
-                    <td>
-                        <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${escapeHtml(ip)}">DESBLOQUEAR</button>
-                    </td>
-                </tr>
-            `;
-            
-            if (existingRow) {
-                if (existingRow.outerHTML !== newRowHtml.trim()) {
-                    existingRow.outerHTML = newRowHtml;
-                }
-            } else {
+            if (!existingRows.has(ip)) {
+                const newRowHtml = `
+                    <tr data-ip="${escapeHtml(ip)}">
+                        <td><code>${escapeHtml(ip)}</code></td>
+                        <td>
+                            <button class="btn-primary btn-small" data-action="unblockIP" data-ip="${escapeHtml(ip)}">DESBLOQUEAR</button>
+                        </td>
+                    </tr>
+                `;
                 tbody.insertAdjacentHTML('beforeend', newRowHtml);
             }
         });
@@ -1253,12 +1263,12 @@ async function unblockIP(ip) {
     }
 }
 
-// Atualização automática dos gráficos de hardware
-setInterval(updateStats, 5000);
+// Atualização automática dos gráficos de hardware (10s) e canais (15s)
+setInterval(updateStats, 10000);
 setInterval(() => {
     const input = document.getElementById('search-input');
     loadAndRenderChannels(input ? input.value : '');
-}, 10000);
+}, 15000);
 updateStats();
 loadAndRenderChannels(); // Load channels on initial page load
 
