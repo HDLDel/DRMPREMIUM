@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Arquitetura DRMPREMIUM",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "player-stream",
+        "label": "Fluxo de Reprodução",
+        "focus": ["client", "nginx_iptv", "express_server", "channels_db"],
+        "note": "Acesso do cliente aos canais autenticados e listas HLS via Nginx."
+      },
+      {
+        "id": "drm-segmentation",
+        "label": "Processamento e Ingestão DRM",
+        "focus": ["express_server", "hls_processor", "stream_cache", "drm_upstream"],
+        "note": "Download de fluxos protegidos, segmentação TS e armazenamento em cache."
+      }
+    ]
+  },
+  "components": [
+    { "id": "client", "type": "external", "label": "Player Web / App", "sublabel": "Cliente IPTV / Browser", "pos": [40, 260], "size": [130, 60] },
+    { "id": "nginx_iptv", "type": "cloud", "label": "Nginx IPTV Engine", "sublabel": "Reverse Proxy & Streamer", "pos": [230, 260], "size": [150, 60] },
+    { "id": "express_server", "type": "backend", "label": "Node.js Express", "sublabel": "API & Auth Controller", "pos": [450, 260], "size": [160, 60] },
+    { "id": "hls_processor", "type": "backend", "label": "Processador HLS", "sublabel": "Segmentador & Decryptor", "pos": [450, 440], "size": [160, 60] },
+    { "id": "channels_db", "type": "database", "label": "Catálogo de Canais", "sublabel": "channels.json / Configs", "pos": [700, 140], "size": [160, 60] },
+    { "id": "stream_cache", "type": "database", "label": "Cache de Segmentos", "sublabel": "Armazenamento TS/M3U8", "pos": [700, 440], "size": [160, 60] },
+    { "id": "drm_upstream", "type": "external", "label": "Provedor Upstream", "sublabel": "Streams DRM / 24Horas", "pos": [960, 260], "size": [150, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Servidor DRMPREMIUM", "wraps": ["nginx_iptv", "express_server", "hls_processor", "channels_db", "stream_cache"] }
+  ],
+  "connections": [
+    { "id": "c-nginx", "from": "client", "to": "nginx_iptv", "label": "HLS / HTTPS", "variant": "emphasis" },
+    { "id": "nginx-exp", "from": "nginx_iptv", "to": "express_server", "label": "Proxy API" },
+    { "id": "exp-ch", "from": "express_server", "to": "channels_db", "label": "Metadados", "fromSide": "top", "toSide": "left" },
+    { "id": "exp-proc", "from": "express_server", "to": "hls_processor", "label": "Controle", "fromSide": "bottom", "toSide": "top", "labelDy": 40 },
+    { "id": "proc-cache", "from": "hls_processor", "to": "stream_cache" },
+    { "id": "exp-up", "from": "express_server", "to": "drm_upstream", "label": "Captura Key" },
+    { "id": "proc-up", "from": "hls_processor", "to": "drm_upstream", "label": "Stream Feed", "fromSide": "right", "toSide": "bottom" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Distribuição HLS", "items": ["Nginx configurado especificamente para distribuição de fluxos TS/M3U8 em alta performance", "Autenticação prévia via middleware Express"] },
+    { "dot": "emerald", "title": "Processamento & Cache", "items": ["Download concorrente de segmentos com bufferização inteligente", "Cache local de mídias para evitar travamentos de reprodução"] },
+    { "dot": "amber", "title": "Gestão de Canais", "items": ["Estrutura baseada em canais 24 Horas e transmissões ao vivo", "Suporte a chaves de proteção e rotação automática de relays"] }
+  ]
+}

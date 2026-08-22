@@ -64,3 +64,7 @@ deploy.py
 
 # Build output
 DRMPREMIUM/
+
+# Graphify Knowledge Graph
+graphify-out/
+
