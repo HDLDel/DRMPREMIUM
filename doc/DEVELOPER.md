@@ -425,6 +425,8 @@ live/VOD servem do filesystem/RAM disk.
 | `SESSION_ID` | `crypto.randomBytes(32)` | Token de sessão (regenerado no boot) |
 | `ADMINS` | `[{user, hash}]` | Credenciais bcrypt hardcoded |
 | `BLOCKED_IPS_FILE` | `/etc/nginx/blocked_ips.json` | IPs bloqueados |
+| `START_BATCH_SIZE` | 10 | Canais por lote no start em massa |
+| `START_BATCH_DELAY_MS` | 500 | Pausa entre lotes (ms) |
 
 ### Variáveis globais
 
@@ -457,6 +459,7 @@ live/VOD servem do filesystem/RAM disk.
 | `getSystemStats()` | Agrega tudo para `/api/status` (inclui `nocache`, `ffmpegCount`) |
 | `countFfmpegProcesses()` | Conta processos FFmpeg ativos no sistema |
 | `startChannel(id)` | Fluxo completo de início |
+| `delay(ms)` | Pausa entre lotes no start em massa (throttle de rede) |
 | `startRelayLoop(channel)` | Relay loop puro: playlist virtual + transmux on-the-fly |
 | `startRelayCached(channel)` | Relay cache: download + transmissão compartilhada |
 | `handleRelayLoopFailure(channelId, req, res, startTime, err)` | Resposta 502 graceful |
@@ -485,6 +488,41 @@ Páginas não autenticadas recebem 302 → `/login.html`.
 - `setInterval(5min)`: sweep de processos transmux mortos (`sweepDeadRelayTransmuxProcs`).
 - `setInterval(12h)`: remove logs com mtime > 12h.
 - `setInterval(30min)`: limpa segmentos órfãos do tmpfs.
+
+### Start em massa (throttle de rede)
+
+Quando todos os canais sobem juntos (reboot ou "Iniciar Tudo"), os FFmpeg
+disparam a mesma rajada de rede ao mesmo tempo — isso esgota os buffers do
+10Gbps e causa retransmissões em massa (os "pequenos travamentos" na
+assinatura `TcpRetransSegs` em milhões).
+
+Para suavizar, o start em massa opera em **lotes com espera**:
+
+- `START_BATCH_SIZE = 10` canais por lote.
+- O lote **termina por completo** antes do próximo começar.
+- Entre lotes há `START_BATCH_DELAY_MS = 500ms` de pausa.
+
+Resultado: 590 canais sobem em ~59 lotes, com a rede consumida de forma
+gradual em vez de tudo de uma vez. Isso vale para os 3 pontos de entrada:
+
+1. `/api/startall` — usa `await Promise.all` por lote + `delay()` entre lotes.
+2. Auto-start do boot (Live/RelaySync) — idem.
+3. Auto-start do boot (Relay Loop e Loop-Cache) — antes era disparo
+   sequencial sem espera; agora usa o mesmo esquema de lotes com espera.
+
+**Nota**: o start de um canal isolado (botão individual, reinício do
+Watchdog/Guardian via `scheduleRelayRestart`) **não passa** por essa fila e
+continua imediato — canal que cai sozinho volta normalmente.
+
+### `-rw_timeout` no FFmpeg relay
+
+Canais relay leem URL(s) externa(s). Se a fonte travar sem entregar dados:
+
+- antes: o FFmpeg podia ficar preso para sempre (consumindo recursos e
+  mantendo retransmissões longas);
+- agora: `-rw_timeout 30000000` (30s) encerra o processo sozinho, em conjunto
+  com o `-reconnect` que já existia. Aplicado no canal comum (`startChannel`)
+  e no transcoder do relay-cache.
 
 ---
 

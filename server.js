@@ -406,6 +406,15 @@ const RELAY_GUARDIAN_MAX_FAILS = 5;
 const RELAY_GUARDIAN_RETRY_MS = 10 * 60 * 1000;
 const relayGuardianPausedAt = new Map(); // channelId -> timestamp da pausa
 
+// Throttle de start em massa: limita a rajada de rede quando todos os canais
+// sobem juntos (startall / reboot). O lote espera terminar antes do próximo.
+const START_BATCH_SIZE = 10;
+const START_BATCH_DELAY_MS = 500;
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Transmux on-the-fly do relay loop (1 ffmpeg leve por pessoa assistindo):
 // controlados para nunca vazar processos quando o cliente desconecta.
 const relayTransmuxProcs = new Map(); // channelId -> Set<proc> (procs de transmux ativos)
@@ -900,6 +909,7 @@ async function startRelayCached(channel) {
         '-stream_loop', '-1',
         '-f', 'concat', '-safe', '0',
         '-protocol_whitelist', 'file,http,https,tcp,tls',
+        '-rw_timeout', '30000000',
         '-i', concatPath
     ];
     if (channel.useTranscode) {
@@ -1661,6 +1671,10 @@ async function startChannel(id) {
 
     if (channel.mode === 'relay') {
         args.push('-protocol_whitelist', 'file,http,https,tcp,tls');
+        // -rw_timeout: desliga o FFmpeg se a fonte travar sem entregar dados.
+        // Funciona junto com -reconnect: se a fonte morre e o reconnect não volta,
+        // o processo termina sozinho em vez de ficar preso para sempre.
+        args.push('-rw_timeout', '30000000');
     }
 
     args.push('-i', playlistPath);
@@ -2513,11 +2527,13 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
         // Não confiar no status persistido: ele pode estar divergente do processo,
         // flag ou modo real do canal. Todos os canais serão avaliados.
         const channelsToStart = [...channels];
-        const BATCH_SIZE = 5;
-        for (let i = 0; i < channelsToStart.length; i += BATCH_SIZE) {
-            const batch = channelsToStart.slice(i, i + BATCH_SIZE);
-            console.log(`[STARTALL] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
-            const results = batch.map(ch => {
+        const RS = START_BATCH_SIZE;
+        for (let i = 0; i < channelsToStart.length; i += RS) {
+            const batch = channelsToStart.slice(i, i + RS);
+            console.log(`[STARTALL] Lote ${Math.floor(i/RS) + 1}/${Math.ceil(channelsToStart.length/RS)}: ${batch.length} canais...`);
+            // Espera o lote todo terminar antes de soltar o próximo:
+            // evita a rajada de rede quando todos sobem juntos (retransmissões em massa).
+            const results = await Promise.all(batch.map(async ch => {
                 clearRelayRestartTimer(ch.id);
                 ch.userStopped = false;
                 if (ch.status === 'vod' && hasVodFlag(ch.id)) {
@@ -2530,19 +2546,18 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
                     return { id: ch.id, name: ch.name, mode: ch.relaySubtype, status: 'already-running', message: 'RELAY LOOP já está ativo.' };
                 }
 
-                const launch = startChannel(ch.id);
-                launch.then(result => {
-                    console.log(`[STARTALL] Canal ${ch.id} (${ch.name}) finalizou: ${result?.status || 'desconhecido'}${result?.message ? ` - ${result.message}` : ''}`);
-                }).catch(error => {
-                    console.error(`[STARTALL] Canal ${ch.id} (${ch.name}) falhou:`, error.message);
-                });
-                return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: 'starting', message: 'Inicialização solicitada. Acompanhe o status do canal.' };
-            });
+                const result = await startChannel(ch.id);
+                console.log(`[STARTALL] Canal ${ch.id} (${ch.name}) finalizou: ${result?.status || 'desconhecido'}${result?.message ? ` - ${result.message}` : ''}`);
+                return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: result?.status === 'success' ? 'success' : 'starting', message: result?.status === 'success' ? 'Iniciado com sucesso.' : 'Inicialização solicitada. Acompanhe o status do canal.' };
+            }));
             for (const result of results) {
                 resultsByChannel.push(result);
                 if (result.status === 'success') {
                     started.push(result.name);
                 }
+            }
+            if (i + RS < channelsToStart.length) {
+                await delay(START_BATCH_DELAY_MS);
             }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3530,30 +3545,46 @@ setTimeout(parseNginxAccessLog, 5000);
      
      // Auto-start de canais Live e Relay Sync (ignora canais parados manualmente)
      const channelsToStart = channels.filter(c => !c.userStopped && (c.status === 'online' || (c.status === 'relay' && isRelaySyncSubtype(c.relaySubtype))));
-     const BATCH_SIZE = 5;
-     for (let i = 0; i < channelsToStart.length; i += BATCH_SIZE) {
-         const batch = channelsToStart.slice(i, i + BATCH_SIZE);
-         console.log(`[AUTO-START] Lote ${Math.floor(i/BATCH_SIZE) + 1}: ${batch.length} canais...`);
+     const BS = START_BATCH_SIZE;
+     for (let i = 0; i < channelsToStart.length; i += BS) {
+         const batch = channelsToStart.slice(i, i + BS);
+         console.log(`[AUTO-START] Lote ${Math.floor(i/BS) + 1}/${Math.ceil(channelsToStart.length/BS)}: ${batch.length} canais...`);
          await Promise.all(batch.map(ch => {
              console.log(`[AUTO-START] Reiniciando transmissão do canal: ${ch.name}`);
              return startChannel(ch.id);
          }));
+         // Pausa entre lotes para não estourar a rede no reboot
+         if (i + BS < channelsToStart.length) {
+             await delay(START_BATCH_DELAY_MS);
+         }
      }
 
     // Auto-start de canais Relay Loop (ignora canais parados manualmente)
     // Loop puro: repasse direto — startRelayLoop faz o probe e cria a flag.
-    for (const channel of channels) {
-        if (channel.mode === 'relay' && channel.relaySubtype === 'loop' && !channel.userStopped) {
+    const relayLoops = channels.filter(c => c.mode === 'relay' && c.relaySubtype === 'loop' && !c.userStopped);
+    for (let i = 0; i < relayLoops.length; i += BS) {
+        const batch = relayLoops.slice(i, i + BS);
+        console.log(`[AUTO-START] Relay Loop — Lote ${Math.floor(i/BS) + 1}/${Math.ceil(relayLoops.length/BS)}: ${batch.length} canais...`);
+        await Promise.all(batch.map(channel => {
             console.log("[AUTO-START] Iniciando Relay Loop para canal " + channel.id + " (" + channel.name + ")");
-            startRelayLoop(channel).catch(e => console.error("[AUTO-START] Erro no Relay Loop do canal " + channel.id + ":", e));
+            return startRelayLoop(channel);
+        })).catch(e => console.error("[AUTO-START] Erro no Relay Loop:", e));
+        if (i + BS < relayLoops.length) {
+            await delay(START_BATCH_DELAY_MS);
         }
     }
 
     // Auto-start de canais Relay Loop-Cache (baixa episódios e serve via ffmpeg persistente)
-    for (const channel of channels) {
-        if (channel.mode === 'relay' && channel.relaySubtype === 'loop-cache' && !channel.userStopped) {
+    const relayLoopCaches = channels.filter(c => c.mode === 'relay' && c.relaySubtype === 'loop-cache' && !c.userStopped);
+    for (let i = 0; i < relayLoopCaches.length; i += BS) {
+        const batch = relayLoopCaches.slice(i, i + BS);
+        console.log(`[AUTO-START] Relay Loop-Cache — Lote ${Math.floor(i/BS) + 1}/${Math.ceil(relayLoopCaches.length/BS)}: ${batch.length} canais...`);
+        await Promise.all(batch.map(channel => {
             console.log("[AUTO-START] Iniciando Relay Loop-Cache para canal " + channel.id + " (" + channel.name + ")");
-            startChannel(channel.id).catch(e => console.error("[AUTO-START] Erro no Relay Loop-Cache do canal " + channel.id + ":", e));
+            return startChannel(channel.id);
+        })).catch(e => console.error("[AUTO-START] Erro no Relay Loop-Cache:", e));
+        if (i + BS < relayLoopCaches.length) {
+            await delay(START_BATCH_DELAY_MS);
         }
     }
     // Cria flag para relay-sync que ainda nao tem flag (ignora canais parados manualmente)
