@@ -8,7 +8,7 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-PROJDIR="$(cd "$(dirname "$0")" && pwd)"
+PROJDIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Copia o arquivo de configuração do Nginx para o diretório de sites-available
 echo "Copiando nginx_iptv.conf para /etc/nginx/sites-available/"

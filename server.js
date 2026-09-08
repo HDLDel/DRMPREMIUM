@@ -411,6 +411,9 @@ const relayGuardianPausedAt = new Map(); // channelId -> timestamp da pausa
 const START_BATCH_SIZE = 10;
 const START_BATCH_DELAY_MS = 500;
 
+// Trava do "Iniciar Tudo": evita que dois pedidos rodem em paralelo
+let startAllRunning = false;
+
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -2521,47 +2524,67 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
     }
 
     if (url.pathname === '/api/startall' && req.method === 'POST') {
-        console.log(`[STARTALL] Requisição recebida: ${channels.length} canais serão avaliados.`);
-        const started = [];
-        const resultsByChannel = [];
-        // Não confiar no status persistido: ele pode estar divergente do processo,
-        // flag ou modo real do canal. Todos os canais serão avaliados.
-        const channelsToStart = [...channels];
-        const RS = START_BATCH_SIZE;
-        for (let i = 0; i < channelsToStart.length; i += RS) {
-            const batch = channelsToStart.slice(i, i + RS);
-            console.log(`[STARTALL] Lote ${Math.floor(i/RS) + 1}/${Math.ceil(channelsToStart.length/RS)}: ${batch.length} canais...`);
-            // Espera o lote todo terminar antes de soltar o próximo:
-            // evita a rajada de rede quando todos sobem juntos (retransmissões em massa).
-            const results = await Promise.all(batch.map(async ch => {
-                clearRelayRestartTimer(ch.id);
-                ch.userStopped = false;
-                if (ch.status === 'vod' && hasVodFlag(ch.id)) {
-                    return { id: ch.id, name: ch.name, mode: 'vod', status: 'already-running', message: 'VOD já está ativo.' };
-                }
-                if (activeStreams.has(ch.id)) {
-                    return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: 'already-running', message: 'Canal já possui processo ativo.' };
-                }
-                if (ch.mode === 'relay' && ch.relaySubtype === 'loop' && ch.status === 'relay' && hasRelayFlag(ch.id)) {
-                    return { id: ch.id, name: ch.name, mode: ch.relaySubtype, status: 'already-running', message: 'RELAY LOOP já está ativo.' };
-                }
-
-                const result = await startChannel(ch.id);
-                console.log(`[STARTALL] Canal ${ch.id} (${ch.name}) finalizou: ${result?.status || 'desconhecido'}${result?.message ? ` - ${result.message}` : ''}`);
-                return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: result?.status === 'success' ? 'success' : 'starting', message: result?.status === 'success' ? 'Iniciado com sucesso.' : 'Inicialização solicitada. Acompanhe o status do canal.' };
-            }));
-            for (const result of results) {
-                resultsByChannel.push(result);
-                if (result.status === 'success') {
-                    started.push(result.name);
-                }
-            }
-            if (i + RS < channelsToStart.length) {
-                await delay(START_BATCH_DELAY_MS);
-            }
+        // O start em massa é lento de propósito (lotes com espera para não
+        // estourar a rede). Respondemos NA HORA e rodamos em segundo plano,
+        // senão o nginx corta a conexão (proxy_read_timeout 60s) e o painel
+        // mostra erro falso mesmo com os canais subindo.
+        if (startAllRunning) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ status: 'already-running', message: 'Iniciar todos já está em andamento em lotes. Acompanhe o status dos canais.', asynchronous: true }));
         }
+        startAllRunning = true;
+        console.log(`[STARTALL] Requisição recebida: ${channels.length} canais serão avaliados.`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'success', started, results: resultsByChannel, asynchronous: true }));
+        res.end(JSON.stringify({ status: 'starting', message: `Inicio em andamento em lotes de ${START_BATCH_SIZE}. Acompanhe o status dos canais.`, asynchronous: true }));
+
+        (async () => {
+            try {
+                const started = [];
+                const resultsByChannel = [];
+                // Não confiar no status persistido: ele pode estar divergente do processo,
+                // flag ou modo real do canal. Todos os canais serão avaliados.
+                const channelsToStart = [...channels];
+                const RS = START_BATCH_SIZE;
+                for (let i = 0; i < channelsToStart.length; i += RS) {
+                    const batch = channelsToStart.slice(i, i + RS);
+                    console.log(`[STARTALL] Lote ${Math.floor(i/RS) + 1}/${Math.ceil(channelsToStart.length/RS)}: ${batch.length} canais...`);
+                    // Espera o lote todo terminar antes de soltar o próximo:
+                    // evita a rajada de rede quando todos sobem juntos (retransmissões em massa).
+                    const results = await Promise.all(batch.map(async ch => {
+                        clearRelayRestartTimer(ch.id);
+                        ch.userStopped = false;
+                        if (ch.status === 'vod' && hasVodFlag(ch.id)) {
+                            return { id: ch.id, name: ch.name, mode: 'vod', status: 'already-running', message: 'VOD já está ativo.' };
+                        }
+                        if (activeStreams.has(ch.id)) {
+                            return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: 'already-running', message: 'Canal já possui processo ativo.' };
+                        }
+                        if (ch.mode === 'relay' && ch.relaySubtype === 'loop' && ch.status === 'relay' && hasRelayFlag(ch.id)) {
+                            return { id: ch.id, name: ch.name, mode: ch.relaySubtype, status: 'already-running', message: 'RELAY LOOP já está ativo.' };
+                        }
+
+                        const result = await startChannel(ch.id);
+                        console.log(`[STARTALL] Canal ${ch.id} (${ch.name}) finalizou: ${result?.status || 'desconhecido'}${result?.message ? ` - ${result.message}` : ''}`);
+                        return { id: ch.id, name: ch.name, mode: ch.relaySubtype || ch.mode, status: result?.status === 'success' ? 'success' : 'starting', message: result?.status === 'success' ? 'Iniciado com sucesso.' : 'Inicialização solicitada. Acompanhe o status do canal.' };
+                    }));
+                    for (const result of results) {
+                        resultsByChannel.push(result);
+                        if (result.status === 'success') {
+                            started.push(result.name);
+                        }
+                    }
+                    if (i + RS < channelsToStart.length) {
+                        await delay(START_BATCH_DELAY_MS);
+                    }
+                }
+                console.log(`[STARTALL] Concluído: ${resultsByChannel.length}/${channelsToStart.length} canais avaliados, ${started.length}/${channelsToStart.length} iniciados.`);
+            } catch (err) {
+                console.error('[STARTALL] Erro no segundo plano:', err?.message || err);
+            } finally {
+                startAllRunning = false;
+            }
+        })();
+        return;
     }
 
     if (url.pathname === '/api/nocache-status') {
@@ -3292,7 +3315,7 @@ if (!isAuth && !(url.pathname === '/login.html' || url.pathname === '/login.js' 
     const blockedExt = ['.env', '.log', '.json', '.md'];
     const blockedFiles = ['server.js', 'package.json', 'package-lock.json', 'channels.json', 'build-obfuscated.py', 'nginx_iptv.conf', '.env.example'];
     const baseName = path.basename(filePath);
-    const isBlockedFile = blockedFiles.includes(baseName) || (blockedExt.includes(path.extname(filePath).toLowerCase()) && !url.pathname.startsWith('/canais/'));
+    const isBlockedFile = blockedFiles.includes(baseName) || url.pathname.startsWith('/scripts/') || (blockedExt.includes(path.extname(filePath).toLowerCase()) && !url.pathname.startsWith('/canais/'));
     if (!filePath.startsWith(staticRoot + path.sep) && filePath !== staticRoot) {
         res.writeHead(403);
         return res.end('Acesso negado');
@@ -3521,7 +3544,7 @@ setTimeout(parseNginxAccessLog, 5000);
      } catch (e) {}
  }
 
- server.listen(PORT, async () => {
+ server.listen({ port: PORT, backlog: 4096 }, async () => {
      await loadChannels(); // Load channels on startup
      killOrphanFFmpeg();
      cleanTmpfsSegments();

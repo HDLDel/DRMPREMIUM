@@ -1326,20 +1326,27 @@ async function startAll() {
         });
         if (res.ok) {
             const data = await res.json().catch(() => ({}));
-            const results = Array.isArray(data.results) ? data.results : [];
-            const success = results.filter(item => item.status === 'success');
-            const alreadyRunning = results.filter(item => item.status === 'already-running');
-            const starting = results.filter(item => item.status === 'starting');
-            const failed = results.filter(item => !['success', 'already-running', 'starting'].includes(item.status));
-            const lines = [
-                `Iniciar Todos solicitado: ${starting.length} em preparação, ${success.length} iniciado(s), ${alreadyRunning.length} já ativo(s), ${failed.length} falha(s).`,
-                ''
-            ];
-            success.forEach(item => lines.push(`✓ ${item.name}`));
-            alreadyRunning.forEach(item => lines.push(`• ${item.name}: ${item.message || 'já ativo'}`));
-            starting.forEach(item => lines.push(`↻ ${item.name}: ${item.message}`));
-            failed.forEach(item => lines.push(`✗ ${item.name}: ${item.message || 'não foi iniciado'}`));
-            if (results.length) alert(lines.join('\n'));
+            // O server responde na hora; os canais sobem em lotes em segundo plano.
+            if (data.status === 'starting') {
+                alert(data.message || 'Início em andamento em lotes. Acompanhe o status dos canais.');
+            } else if (data.status === 'already-running') {
+                alert(data.message || 'Iniciar todos já está em andamento.');
+            } else {
+                const results = Array.isArray(data.results) ? data.results : [];
+                const success = results.filter(item => item.status === 'success');
+                const alreadyRunning = results.filter(item => item.status === 'already-running');
+                const starting = results.filter(item => item.status === 'starting');
+                const failed = results.filter(item => !['success', 'already-running', 'starting'].includes(item.status));
+                const lines = [
+                    `Iniciar Todos solicitado: ${starting.length} em preparação, ${success.length} iniciado(s), ${alreadyRunning.length} já ativo(s), ${failed.length} falha(s).`,
+                    ''
+                ];
+                success.forEach(item => lines.push(`✓ ${item.name}`));
+                alreadyRunning.forEach(item => lines.push(`• ${item.name}: ${item.message || 'já ativo'}`));
+                starting.forEach(item => lines.push(`↻ ${item.name}: ${item.message}`));
+                failed.forEach(item => lines.push(`✗ ${item.name}: ${item.message || 'não foi iniciado'}`));
+                if (results.length) alert(lines.join('\n'));
+            }
             invalidateAllChannelsCache();
             updateStats();
             loadAndRenderChannels(document.getElementById('search-input') ? document.getElementById('search-input').value : '');

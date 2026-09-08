@@ -3,7 +3,7 @@
 # 1. Limpa logs dos canais a cada 2 horas
 # 2. Reinicia a máquina diariamente às 3:00
 
-PROJDIR="$(cd "$(dirname "$0")" && pwd)"
+PROJDIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOGS_DIR="$PROJDIR/logs"
 
 # Garante que a pasta de logs existe

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sincroniza a config do nginx do sistema com o projeto (versionado no git)
-PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJ_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SYS_CONF="/etc/nginx/sites-enabled/nginx_iptv.conf"
 PROJ_CONF="$PROJ_DIR/nginx_iptv.conf"
 

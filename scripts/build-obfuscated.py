@@ -27,7 +27,7 @@ EXCLUDE = {
     'session-ses_0cda.md', 'session-ses_0d03.md', 'session-ses_0e62.md',
     'listagem.md', 'skills',
     'ajuste.sh', 'install_ubuntu.sh', 'update_nginx.sh',
-    'setup_crons.sh', 'sync_nginx_config.sh',
+    'setup_crons.sh', 'sync_nginx_config.sh', 'scripts',
     'deploy.py', 'build-obfuscated.py',
 }
 

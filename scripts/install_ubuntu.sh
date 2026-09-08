@@ -7,7 +7,7 @@ fi
 
 set -e
 
-PROJDIR="$(cd "$(dirname "$0")" && pwd)"
+PROJDIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_USER="drmpremium"
 
 # ═══════════════════════════════════════════════
@@ -188,7 +188,7 @@ echo "=== Ajustes de desempenho aplicados ==="
 
 if [ -f "$PROJDIR/setup_crons.sh" ]; then
   echo "=== Configurando crons do sistema ==="
-  bash "$PROJDIR/setup_crons.sh"
+  bash "$PROJDIR/scripts/setup_crons.sh"
 fi
 
 # ═══════════════════════════════════════════════

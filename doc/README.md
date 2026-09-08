@@ -22,7 +22,9 @@ monitorar CPU/RAM/disco/rede, acompanhar segurança e exportar playlist M3U.
 | Documento       | Público         | Conteúdo                                  |
 | --------------- | --------------- | ----------------------------------------- |
 | `doc/README.md` | Todos           | Visão geral, instalação, deploy e operação|
+| `doc/DEPLOY.md` | Ops             | Sequência de instalação em máquina nova + o que cada script faz |
 | `doc/DEVELOPER.md` | Devs         | Arquitetura, API completa e referência    |
+| `doc/SERVER_TUNING.md` | Ops        | Tuning de rede (RPS, filas, nginx) anti travamento |
 | `doc/USER_GUIDE.md` | Usuários finais | Manual do dashboard passo a passo      |
 
 ## Estrutura do projeto
@@ -38,9 +40,9 @@ DRMPREMIUM/
   ├── channels.json         → Banco de canais (config em JSON)
   ├── package.json          → Dependência: bcryptjs
   ├── nginx_iptv.conf       → Config Nginx (proxy + HLS)
-  ├── install_ubuntu.sh     → Instalador Ubuntu
-  ├── update_nginx.sh       → Reaplicar config Nginx
-  ├── build-obfuscated.py   → Build ofuscado em DRMPREMIUM/
+  ├── scripts/               → Scripts utilitários (instalação, nginx, crons, build)
+  ├── scripts/server-tuning/ → Tuning de rede do servidor (install.sh + RPS) — ver doc/SERVER_TUNING.md
+  ├── build-obfuscated.py   → Build ofuscado em DRMPREMIUM/ (org. em scripts/)
   ├── fonts/                → Fontes auto-hospedadas (VT323)
   ├── logs/                 → Logs FFmpeg por canal (canal_{id}.log)
   ├── 24HORAS/              → Pasta raiz de vídeos fonte
@@ -175,7 +177,7 @@ pm2 save
 pm2 startup systemd -u root --hp /root
 
 # Build de distribuição (ofusca server.js/script.js, minifica HTML/CSS)
-python3 build-obfuscated.py   # → gera a pasta DRMPREMIUM/
+python3 scripts/build-obfuscated.py   # → gera a pasta DRMPREMIUM/
 
 # Nginx
 sudo cp nginx_iptv.conf /etc/nginx/sites-available/
@@ -222,8 +224,8 @@ os usuários compartilham a mesma sessão. Rotas públicas: `/login.html`,
 ```bash
 git clone <URL> /opt/drmpremium
 cd /opt/drmpremium
-chmod +x install_ubuntu.sh
-sudo ./install_ubuntu.sh
+chmod +x scripts/install_ubuntu.sh
+sudo ./scripts/install_ubuntu.sh
 pm2 start server.js --name 24horas
 pm2 save
 ```
@@ -282,7 +284,7 @@ O deploy de testes é feito pela skill `deploy-teste`:
 
 ```bash
 # 1. Gerar o build (ofuscado/minificado) na pasta DRMPREMIUM/
-python3 build-obfuscated.py
+python3 scripts/build-obfuscated.py
 
 # 2. Executar o deploy (SSH/SFTP para 1.0.0.1)
 python3 .agents/skills/deploy-teste/scripts/deploy.py
@@ -353,7 +355,7 @@ pm2 logs 24horas
 cp channels.json channels.json.bak
 
 # Reaplicar config Nginx
-sudo ./update_nginx.sh
+sudo ./scripts/update_nginx.sh
 ```
 
 ## Troubleshooting

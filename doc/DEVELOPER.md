@@ -514,6 +514,17 @@ gradual em vez de tudo de uma vez. Isso vale para os 3 pontos de entrada:
 Watchdog/Guardian via `scheduleRelayRestart`) **não passa** por essa fila e
 continua imediato — canal que cai sozinho volta normalmente.
 
+### Tuning de rede do servidor (O.S.)
+
+O throttle do código (seção acima) reduz a rajada, mas o sistema operacional
+também precisa de ajustes para não descartar pacotes quando o pico chega:
+**RPS nas filas de RX (rede espalhada por todos os cores)**, filas do kernel
+maiores (`somaxconn`, `netdev_max_backlog`) e nginx com `backlog=4096` +
+`worker_connections`/`multi_accept`.
+
+Detalhes, valores e o instalador idempotente (`scripts/server-tuning/install.sh`) em
+→ **[`doc/SERVER_TUNING.md`](./SERVER_TUNING.md)**.
+
 ### `-rw_timeout` no FFmpeg relay
 
 Canais relay leem URL(s) externa(s). Se a fonte travar sem entregar dados:
@@ -753,9 +764,9 @@ dinâmico, live e VOD.
 
 ## Arquivos de apoio
 
-- `install_ubuntu.sh` — instalação automatizada (Node 20, FFmpeg, Nginx,
+- `scripts/install_ubuntu.sh` — instalação automatizada (Node 20, FFmpeg, Nginx,
   PM2, pastas, config Nginx, blocked_ips vazios).
-- `update_nginx.sh` — reaplica a config do Nginx.
-- `build-obfuscated.py` — gera `DRMPREMIUM/` com `server.js`/`script.js`
+- `scripts/update_nginx.sh` — reaplica a config do Nginx.
+- `scripts/build-obfuscated.py` — gera `DRMPREMIUM/` com `server.js`/`script.js`
   ofuscados e HTML/CSS minificados; copia `fonts/`; mantém `channels.json`
   preservado no destino durante o deploy.
