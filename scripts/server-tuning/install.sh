@@ -5,7 +5,7 @@
 # Aplica, de forma idempotente (pode rodar quantas vezes quiser):
 #   1. nginx: worker_connections 4096 + multi_accept on
 #   2. nginx_iptv.conf do projeto para /etc/nginx/sites-available/
-#   3. sysctl: net.core.somaxconn = 4096 + netdev_max_backlog = 5000
+#   3. sysctl: fs.file-max = 2097152 + somaxconn = 4096 + netdev_max_backlog = 5000
 #   4. RPS (uma fila de RX por core) + serviço systemd persistente
 #
 # Antes de mexer, faz backup dos arquivos do sistema com data/hora.
@@ -73,11 +73,12 @@ echo "[sysctl] Backup: ${SYSCONF}.bak.${TIMESTAMP}"
 while read -r key val; do
     grep -qE "^${key}[[:space:]]*=" "$SYSCONF" || echo "${key} = ${val}" >> "$SYSCONF"
 done <<'EOF'
+fs.file-max 2097152
 net.core.somaxconn 4096
 net.core.netdev_max_backlog 5000
 EOF
 sysctl -p
-echo "[sysctl] somaxconn=4096 + netdev_max_backlog=5000 persistidos e aplicados"
+echo "[sysctl] fs.file-max=2097152 + somaxconn=4096 + netdev_max_backlog=5000 persistidos e aplicados"
 
 # ------------------------------------------------------------
 # 4. RPS + serviço systemd

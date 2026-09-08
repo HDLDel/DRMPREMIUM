@@ -26,7 +26,7 @@ pacotes** (`rx_dropped`) e as conexões voltam a ser reenviadas milhares de veze
 |---|----------------------------------|---------------------------|--------------------------------------------|
 | 1 | Throttle de subida em massa (código) | lotes de 10 + pausa 500ms | evita a rajada de quase 600 FFmpeg juntos |
 | 2 | RPS em todas as filas RX         | máscara = todos os cores  | espalha a rede por todos os cores          |
-| 3 | Filas de aceite/backlog maiores  | `somaxconn 4096`, `netdev_max_backlog 5000` | absorve o pico sem descartar |
+| 3 | Filas de aceite/backlog maiores  | `fs.file-max 2097152`, `somaxconn 4096`, `netdev_max_backlog 5000` | absorve o pico sem descartar |
 | 4 | Nginx: fila 4096 + timeouts 600s | `backlog=4096 reuseport`, `proxy_read_timeout 600s` | "Iniciar Tudo" não dá timeout (504) |
 
 O item **1** vive no código (`doc/DEVELOPER.md` → "Start em massa"). Os itens
@@ -48,8 +48,9 @@ pede reboot** ao final. Faça um reboot quando conveniente.
 1. **nginx.conf** → `worker_connections 4096` + `multi_accept on`
 2. **nginx_iptv.conf** (do projeto) → copiado para `/etc/nginx/sites-available/`
    (+ symlink + remove default), `nginx -t` e `reload`
-3. **sysctl** → `net.core.somaxconn = 4096` e `net.core.netdev_max_backlog = 5000`
-   adicionados ao `/etc/sysctl.conf` e aplicados na hora (`sysctl -p`)
+3. **sysctl** → `fs.file-max = 2097152`, `net.core.somaxconn = 4096` e
+   `net.core.netdev_max_backlog = 5000` adicionados ao `/etc/sysctl.conf` e
+   aplicados na hora (`sysctl -p`)
 4. **RPS** → `/usr/local/sbin/iptv-rps-tune.sh` espalha o RX por todos os cores
    de TODAS as filas da interface + serviço `iptv-rps.service` (systemd) que
    reaplica no boot
