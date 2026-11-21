@@ -26,6 +26,13 @@ desktop.ini
 .env.*
 config.json
 config.*.json
+.config/
+data/
+*.db
+*.sqlite
+*.sqlite3
+sessions.json
+login_attempts.json
 
 # Arquivos
 
